@@ -2,6 +2,17 @@
 
 This directory contains pre-configured JSON files for easy setup of all MCP transport modes.
 
+## 📊 Architecture Overview
+
+For a detailed understanding of how each MCP server implementation works, including visual diagrams and architecture explanations, see the **[Architecture Documentation](ARCHITECTURE.md)**.
+
+The diagrams show:
+- SSE (Server-Sent Events) implementation flow
+- STDIO (Standard I/O) communication pattern  
+- Streamable HTTP server architecture
+- MCP protocol request/response sequences
+- Component interactions and data flow
+
 ## Quick Setup
 
 ### For Claude Desktop
