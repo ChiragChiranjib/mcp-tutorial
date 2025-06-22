@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "tutorial-mcp-stdio": {
+      "command": "/Users/chirag.chiranjib/razorpay/golang/mcp/tutorial/bin/stdio",
+      "args": []
+    },
+    "tutorial-mcp-sse": {
+      "url": "http://localhost:8080/sse",
+      "transport": "sse"
+    },
+    "tutorial-mcp-http": {
+      "transport": {
+        "type": "http",
+        "url": "http://localhost:8081/mcp"
+      }
+    }
+  }
+} 

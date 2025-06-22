@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "tutorial-mcp-stdio": {
+      "command": "/Users/chirag.chiranjib/razorpay/golang/mcp/tutorial/bin/stdio",
+      "args": []
+    },
+    "tutorial-mcp-sse": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8080/sse"
+      ]
+    },
+    "tutorial-mcp-http": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8081/mcp"
+      ]
+    }
+  }
+} 
