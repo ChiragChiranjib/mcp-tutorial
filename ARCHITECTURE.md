@@ -11,155 +11,9 @@ The tutorial provides three different MCP server implementations:
 
 All implementations share the same core MCP functionality but use different transport mechanisms.
 
-## SSE Implementation Architecture
+## Client-Server Transport Patterns
 
-The SSE implementation uses HTTP with Server-Sent Events for real-time bidirectional communication.
-
-```mermaid
-graph TB
-    subgraph "SSE MCP Server (Port 8080)"
-        A[main.go] --> B[MCP Server Core]
-        B --> C[SSE Server Wrapper]
-        C --> D[HTTP Server with SSE]
-        
-        subgraph "MCP Core Components"
-            B --> E[Tools]
-            B --> F[Prompts] 
-            B --> G[Resources]
-        end
-        
-        subgraph "Tools"
-            E --> H[Calculator Tool]
-            E --> I[System Info Tool]
-        end
-        
-        subgraph "Prompts"
-            F --> J[Math Tutor Prompt]
-            F --> K[Code Review Prompt]
-        end
-        
-        subgraph "Resources"
-            G --> L[System Status Resource]
-            G --> M[Math Constants Resource]
-        end
-    end
-    
-    subgraph "Client Side"
-        N[MCP Client] --> O[HTTP/SSE Connection]
-        O --> P[Keep-Alive Mechanism<br/>10s interval]
-    end
-    
-    P <--> D
-    
-    style A fill:#e1f5fe
-    style C fill:#f3e5f5
-    style D fill:#e8f5e8
-```
-
-## STDIO Implementation Architecture
-
-The STDIO implementation uses standard input/output streams for communication, ideal for process-based integration.
-
-```mermaid
-graph TB
-    subgraph "STDIO MCP Server"
-        A[main.go] --> B[MCP Server Core]
-        B --> C[STDIO Server Wrapper]
-        C --> D[stdin/stdout Interface]
-        
-        subgraph "MCP Core Components"
-            B --> E[Tools]
-            B --> F[Prompts]
-            B --> G[Resources]
-        end
-        
-        subgraph "Tools"
-            E --> H[Calculator Tool]
-            E --> I[System Info Tool]
-        end
-        
-        subgraph "Prompts"
-            F --> J[Math Tutor Prompt]
-            F --> K[Code Review Prompt]
-        end
-        
-        subgraph "Resources"
-            G --> L[System Status Resource]
-            G --> M[Math Constants Resource]
-        end
-        
-        subgraph "I/O Streams"
-            D --> N[os.Stdin]
-            D --> O[os.Stdout]
-            P[os.Stderr] --> Q[Logging Output]
-        end
-    end
-    
-    subgraph "Client Process"
-        R[MCP Client Process] --> S[Process Communication]
-        S --> T[stdin pipe]
-        S --> U[stdout pipe]
-    end
-    
-    T <--> N
-    U <--> O
-    Q -.-> V[External Logs]
-    
-    style A fill:#e1f5fe
-    style C fill:#fff3e0
-    style D fill:#e8f5e8
-```
-
-## Streamable HTTP Implementation Architecture
-
-The Streamable HTTP implementation provides HTTP-based communication with stateless streaming capabilities.
-
-```mermaid
-graph TB
-    subgraph "Streamable HTTP MCP Server (Port 8081)"
-        A[main.go] --> B[MCP Server Core]
-        B --> C[Streamable HTTP Server]
-        C --> D[HTTP Server<br/>Stateless Mode]
-        
-        subgraph "MCP Core Components"
-            B --> E[Tools]
-            B --> F[Prompts]
-            B --> G[Resources]
-        end
-        
-        subgraph "Tools"
-            E --> H[Calculator Tool]
-            E --> I[System Info Tool]
-        end
-        
-        subgraph "Prompts"  
-            F --> J[Math Tutor Prompt]
-            F --> K[Code Review Prompt]
-        end
-        
-        subgraph "Resources"
-            G --> L[System Status Resource]
-            G --> M[Math Constants Resource]
-        end
-    end
-    
-    subgraph "Client Side"
-        N[HTTP Client] --> O[HTTP Requests]
-        O --> P[Streaming Responses]
-        Q[Load Balancer] --> R[Multiple Instances]
-    end
-    
-    P <--> D
-    R -.-> D
-    
-    style A fill:#e1f5fe
-    style C fill:#fce4ec
-    style D fill:#e8f5e8
-```
-
-## Client-Server Communication Patterns
-
-### STDIO Communication Flow
+### STDIO Transport Flow
 
 The STDIO implementation uses standard input/output streams for direct process communication.
 
@@ -198,142 +52,150 @@ sequenceDiagram
     S->>P: Clean Shutdown
 ```
 
-### SSE Communication Flow
+### SSE Transport Flow
 
 The SSE implementation uses HTTP with Server-Sent Events for real-time bidirectional communication.
 
 ```mermaid
 sequenceDiagram
     participant C as MCP Client
-    participant H as HTTP Server (Port 8080)
-    participant S as MCP Server (SSE)
+    participant S as MCP Server (SSE) on Port 8080
     
     Note over C,S: SSE Connection Setup
-    C->>H: GET /sse
-    H->>S: Initialize SSE Connection
-    S->>H: Generate session_id
-    H->>C: 200 OK + SSE Headers<br/>data: {"session_id": "abc123"}
+    C->>S: GET /sse
+    S->>S: Initialize SSE Connection
+    S->>C: 200 OK + SSE Headers<br/>data: {"session_id": "abc123"}
     
     Note over C,S: Session Established
     C->>C: Store session_id = "abc123"
-    H->>C: SSE Keep-Alive (every 10s)<br/>data: {"type": "ping"}
+    S->>C: SSE Keep-Alive (every 10s)<br/>data: {"type": "ping"}
     
     Note over C,S: MCP Operations via Message Endpoint
-    C->>H: POST /message?session_id=abc123<br/>{"method": "initialize", ...}
-    H->>C: 202 Accepted (Request Queued)
-    H->>S: Route to Session Handler
-    S->>S: Process Initialize Request
-    S->>H: {"result": {"capabilities": ...}}
-    H->>C: SSE Push<br/>data: {"result": {"capabilities": ...}}
+    C->>S: POST /message?session_id=abc123<br/>{"method": "initialize", ...}
+    S->>C: 202 Accepted (Request Queued)
+    S->>S: Route to Session Handler & Process Initialize Request
+    S->>C: SSE Push<br/>data: {"result": {"capabilities": ...}}
     
     Note over C,S: Tool Calls
-    C->>H: POST /message?session_id=abc123<br/>{"method": "tools/call", "params": {...}}
-    H->>C: 202 Accepted (Request Queued)
-    H->>S: Route to Session Handler
-    S->>S: Execute Calculator Tool
-    S->>H: {"result": {"content": [...]}}
-    H->>C: SSE Push<br/>data: {"result": {"content": [...]}}
+    C->>S: POST /message?session_id=abc123<br/>{"method": "tools/call", "params": {...}}
+    S->>C: 202 Accepted (Request Queued)
+    S->>S: Route to Session Handler & Execute Calculator Tool
+    S->>C: SSE Push<br/>data: {"result": {"content": [...]}}
     
     Note over C,S: Server-Initiated Notifications (Optional)
-    S->>H: Server Event/Notification
-    H->>C: SSE Push<br/>data: {"type": "notification", ...}
+    S->>S: Generate Server Event/Notification
+    S->>C: SSE Push<br/>data: {"type": "notification", ...}
     
     Note over C,S: Connection Cleanup
-    C->>H: Close SSE Connection
-    H->>S: Cleanup Session
-    S->>S: Remove session_id
+    C->>S: Close SSE Connection
+    S->>S: Cleanup Session & Remove session_id
 ```
 
-### Streamable HTTP Communication Flow
+### Streamable HTTP Transport Flow
 
 The Streamable HTTP implementation provides stateless HTTP communication with optional SSE upgrade for notifications.
 
 ```mermaid
 sequenceDiagram
     participant C as MCP Client
-    participant H as HTTP Server (Port 8081)
-    participant S as MCP Server (HTTP)
+    participant S as MCP Server (HTTP) on Port 8081
     
     Note over C,S: Direct MCP Endpoint Access
-    C->>H: POST /mcp<br/>{"method": "initialize", ...}
-    H->>S: Process Request (Stateless)
-    S->>S: Handle Initialize
-    S->>H: {"result": {"capabilities": ...}}
-    H->>C: 200 OK + JSON Response
+    C->>S: POST /mcp<br/>{"method": "initialize", ...}
+    S->>S: Process Request (Stateless) & Handle Initialize
+    S->>C: 200 OK + JSON Response<br/>{"result": {"capabilities": ...}}
     
     Note over C,S: Tool Execution (Stateless)
-    C->>H: POST /mcp<br/>{"method": "tools/call", "params": {"name": "calculator", ...}}
-    H->>S: Process Request (No Session)
-    S->>S: Execute Calculator Tool
-    S->>H: {"result": {"content": [{"type": "text", "text": "5 * 3 = 15"}]}}
-    H->>C: 200 OK + Tool Result
+    C->>S: POST /mcp<br/>{"method": "tools/call", "params": {"name": "calculator", ...}}
+    S->>S: Process Request (No Session) & Execute Calculator Tool
+    S->>C: 200 OK + Tool Result<br/>{"result": {"content": [{"type": "text", "text": "5 * 3 = 15"}]}}
     
     Note over C,S: Resource Access (Stateless)
-    C->>H: POST /mcp<br/>{"method": "resources/read", "params": {"uri": "math://constants"}}
-    H->>S: Process Request (No Session)
-    S->>S: Generate Math Constants
-    S->>H: {"result": {"contents": [...]}}
-    H->>C: 200 OK + Resource Data
+    C->>S: POST /mcp<br/>{"method": "resources/read", "params": {"uri": "math://constants"}}
+    S->>S: Process Request (No Session) & Generate Math Constants
+    S->>C: 200 OK + Resource Data<br/>{"result": {"contents": [...]}}
     
     Note over C,S: Optional SSE Upgrade for Notifications
-    alt Server Needs to Send Notifications
-        C->>H: GET /sse-upgrade
-        H->>S: Initialize Notification Channel
-        S->>H: Generate temp session for notifications
-        H->>C: 200 OK + SSE Headers<br/>data: {"upgrade": "success"}
+    C->>S: POST /mcp<br/>{"method": "tools/get", "params": {"name": "calculator"}}
+    
+    alt Single HTTP Response
+        S->>S: Process Request (Stateless)
+        S->>C: 200 OK + JSON Response<br/>{"result": {"response": ...}}
+    else Server Opens SSE Stream
+        S->>S: Initialize SSE Session & Generate SSE stream for session
+        S->>C: 200 OK + SSE Headers<br/>Connection: Keep-Alive
         
-        Note over C,S: Notification Delivery
-        S->>H: Server Notification
-        H->>C: SSE Push<br/>data: {"type": "server_notification", ...}
+        Note over C,S: SSE Stream Active
+        loop While Connection Remains Open
+            S->>S: Generate SSE Messages
+            S->>C: SSE Event: data: {"response": ...}
+        end
         
-        Note over C,S: Continue Regular /mcp Calls
-        C->>H: POST /mcp<br/>{"method": "tools/list"}
-        H->>S: Process Request (Still Stateless)
-        S->>H: {"result": {"tools": [...]}}
-        H->>C: 200 OK + Tools List
+        Note over C,S: Connection Cleanup
+        C->>S: Close SSE Connection
+        S->>S: Cleanup Session & Remove session_id
     end
 ```
 
-## MCP Protocol Flow
+## MCP Tutorial Server Architecture
 
-This diagram shows the typical request-response flow for MCP operations across all implementations.
+This unified architecture diagram shows how the MCP Tutorial Server uses a pluggable transport design with shared business logic components.
 
 ```mermaid
-sequenceDiagram
-    participant C as MCP Client
-    participant S as MCP Server
-    participant T as Tool Handler
-    participant R as Resource Handler
-    participant P as Prompt Handler
-
-    Note over C,P: Initialization Phase
-    C->>S: Initialize Connection
-    S->>C: Server Capabilities
+graph TB
+    subgraph "Shared Business Logic: /mcp Package"
+        SHARED["Common MCP Components<br/><br/>Tools (mcp/tools.go)<br/>• CalculatorTool - 6 operations<br/>• SystemInfoTool - time/date info<br/><br/>Prompts (mcp/prompts.go)<br/>• MathTutorPrompt - tutoring<br/>• CodeReviewPrompt - analysis<br/><br/>Resources (mcp/resources.go)<br/>• SystemStatusResource - status<br/>• MathConstantsResource - constants"]
+    end
     
-    Note over C,P: Tool Execution Flow
-    C->>S: List Available Tools
-    S->>C: [calculator, system_info]
-    C->>S: Call Tool (calculator)
-    S->>T: Execute Calculator
-    T->>T: Perform Math Operation
-    T->>S: Return Result
-    S->>C: Tool Response
+    subgraph "Transport Implementations: /cmd Directory"
+        subgraph "SSE Implementation"
+            SSE_FLOW["cmd/sse/main.go<br/>1. Create MCP Server<br/>2. Add Shared Components<br/>3. Wrap with SSE Transport<br/>4. Start on Port 8080"]
+            
+            SSE_TRANSPORT["SSE Transport<br/>NewSSEServer<br/>• HTTP + Server-Sent Events<br/>• Stateful Sessions<br/>• Real-time bidirectional"]
+        end
+        
+        subgraph "STDIO Implementation"
+            STDIO_FLOW["cmd/stdio/main.go<br/>1. Create MCP Server<br/>2. Add Shared Components<br/>3. Wrap with STDIO Transport<br/>4. Listen on stdin/stdout"]
+            
+            STDIO_TRANSPORT["STDIO Transport<br/>NewStdioServer<br/>• Standard I/O Streams<br/>• Process Communication<br/>• Stateless"]
+        end
+        
+        subgraph "HTTP Implementation"
+            HTTP_FLOW["cmd/streamable_http/main.go<br/>1. Create MCP Server<br/>2. Add Shared Components<br/>3. Wrap with HTTP Transport<br/>4. Start on Port 8081"]
+            
+            HTTP_TRANSPORT["HTTP Transport<br/>NewStreamableHTTPServer<br/>• Pure HTTP Requests<br/>• Stateless + Optional SSE<br/>• REST-like calls"]
+        end
+    end
     
-    Note over C,P: Resource Access Flow
-    C->>S: List Resources
-    S->>C: [system://status, math://constants]
-    C->>S: Read Resource (system://status)
-    S->>R: Get System Status
-    R->>R: Generate Status JSON
-    R->>S: Return Status
-    S->>C: Resource Content
+    subgraph "Client Connections"
+        CLIENT1["MCP Client<br/>SSE Connection"]
+        CLIENT2["MCP Client<br/>Process Pipes"]
+        CLIENT3["MCP Client<br/>HTTP Requests"]
+    end
     
-    Note over C,P: Prompt Usage Flow
-    C->>S: Get Prompt (math_tutor)
-    S->>P: Generate Math Tutor Prompt
-    P->>P: Build Custom Prompt
-    P->>S: Return Prompt Template
-    S->>C: Prompt Content
+    %% Single clean connection showing shared components are used by all
+    SHARED -.-> SSE_FLOW
+    SHARED -.-> STDIO_FLOW  
+    SHARED -.-> HTTP_FLOW
+    
+    %% Flow within each implementation
+    SSE_FLOW --> SSE_TRANSPORT
+    STDIO_FLOW --> STDIO_TRANSPORT
+    HTTP_FLOW --> HTTP_TRANSPORT
+    
+    %% Client connections
+    SSE_TRANSPORT <--> CLIENT1
+    STDIO_TRANSPORT <--> CLIENT2
+    HTTP_TRANSPORT <--> CLIENT3
+    
+    %% Styling
+    style SHARED fill:#f0f8f0,stroke:#4caf50,stroke-width:2px
+    style SSE_FLOW fill:#f3e5f5,stroke:#9c27b0
+    style STDIO_FLOW fill:#fff3e0,stroke:#ff9800
+    style HTTP_FLOW fill:#fce4ec,stroke:#e91e63
+    style SSE_TRANSPORT fill:#f3e5f5,stroke:#9c27b0
+    style STDIO_TRANSPORT fill:#fff3e0,stroke:#ff9800
+    style HTTP_TRANSPORT fill:#fce4ec,stroke:#e91e63
 ```
 
 ## Getting Started

@@ -42,6 +42,7 @@ func main() {
 		server.WithLogging(),
 		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(true, true),
+		server.WithPromptCapabilities(true),
 	)
 
 	mcpServer.AddTools(
