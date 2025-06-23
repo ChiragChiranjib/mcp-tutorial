@@ -157,6 +157,143 @@ graph TB
     style D fill:#e8f5e8
 ```
 
+## Client-Server Communication Patterns
+
+### STDIO Communication Flow
+
+The STDIO implementation uses standard input/output streams for direct process communication.
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant P as Process
+    participant S as MCP Server (STDIO)
+    
+    Note over C,S: Process Initialization
+    C->>P: Start Server Process
+    P->>S: Launch main.go
+    S->>P: Ready on stdin/stdout
+    
+    Note over C,S: MCP Handshake
+    C->>S: {"jsonrpc": "2.0", "method": "initialize", ...}
+    Note over S: Read from stdin
+    S->>C: {"jsonrpc": "2.0", "result": {"capabilities": ...}}
+    Note over C: Read from stdout
+    
+    Note over C,S: Tool Execution
+    C->>S: {"method": "tools/call", "params": {"name": "calculator", ...}}
+    Note over S: Process via stdin
+    S->>S: Execute Calculator Tool
+    S->>C: {"result": {"content": [{"type": "text", "text": "2 + 2 = 4"}]}}
+    Note over C: Receive via stdout
+    
+    Note over C,S: Resource Access
+    C->>S: {"method": "resources/read", "params": {"uri": "system://status"}}
+    S->>S: Generate System Status
+    S->>C: {"result": {"contents": [{"uri": "system://status", ...}]}}
+    
+    Note over C,S: Process Termination
+    C->>P: Terminate Process
+    P->>S: SIGTERM/SIGINT
+    S->>P: Clean Shutdown
+```
+
+### SSE Communication Flow
+
+The SSE implementation uses HTTP with Server-Sent Events for real-time bidirectional communication.
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant H as HTTP Server (Port 8080)
+    participant S as MCP Server (SSE)
+    
+    Note over C,S: SSE Connection Setup
+    C->>H: GET /sse
+    H->>S: Initialize SSE Connection
+    S->>H: Generate session_id
+    H->>C: 200 OK + SSE Headers<br/>data: {"session_id": "abc123"}
+    
+    Note over C,S: Session Established
+    C->>C: Store session_id = "abc123"
+    H->>C: SSE Keep-Alive (every 10s)<br/>data: {"type": "ping"}
+    
+    Note over C,S: MCP Operations via Message Endpoint
+    C->>H: POST /message?session_id=abc123<br/>{"method": "initialize", ...}
+    H->>C: 202 Accepted (Request Queued)
+    H->>S: Route to Session Handler
+    S->>S: Process Initialize Request
+    S->>H: {"result": {"capabilities": ...}}
+    H->>C: SSE Push<br/>data: {"result": {"capabilities": ...}}
+    
+    Note over C,S: Tool Calls
+    C->>H: POST /message?session_id=abc123<br/>{"method": "tools/call", "params": {...}}
+    H->>C: 202 Accepted (Request Queued)
+    H->>S: Route to Session Handler
+    S->>S: Execute Calculator Tool
+    S->>H: {"result": {"content": [...]}}
+    H->>C: SSE Push<br/>data: {"result": {"content": [...]}}
+    
+    Note over C,S: Server-Initiated Notifications (Optional)
+    S->>H: Server Event/Notification
+    H->>C: SSE Push<br/>data: {"type": "notification", ...}
+    
+    Note over C,S: Connection Cleanup
+    C->>H: Close SSE Connection
+    H->>S: Cleanup Session
+    S->>S: Remove session_id
+```
+
+### Streamable HTTP Communication Flow
+
+The Streamable HTTP implementation provides stateless HTTP communication with optional SSE upgrade for notifications.
+
+```mermaid
+sequenceDiagram
+    participant C as MCP Client
+    participant H as HTTP Server (Port 8081)
+    participant S as MCP Server (HTTP)
+    
+    Note over C,S: Direct MCP Endpoint Access
+    C->>H: POST /mcp<br/>{"method": "initialize", ...}
+    H->>S: Process Request (Stateless)
+    S->>S: Handle Initialize
+    S->>H: {"result": {"capabilities": ...}}
+    H->>C: 200 OK + JSON Response
+    
+    Note over C,S: Tool Execution (Stateless)
+    C->>H: POST /mcp<br/>{"method": "tools/call", "params": {"name": "calculator", ...}}
+    H->>S: Process Request (No Session)
+    S->>S: Execute Calculator Tool
+    S->>H: {"result": {"content": [{"type": "text", "text": "5 * 3 = 15"}]}}
+    H->>C: 200 OK + Tool Result
+    
+    Note over C,S: Resource Access (Stateless)
+    C->>H: POST /mcp<br/>{"method": "resources/read", "params": {"uri": "math://constants"}}
+    H->>S: Process Request (No Session)
+    S->>S: Generate Math Constants
+    S->>H: {"result": {"contents": [...]}}
+    H->>C: 200 OK + Resource Data
+    
+    Note over C,S: Optional SSE Upgrade for Notifications
+    alt Server Needs to Send Notifications
+        C->>H: GET /sse-upgrade
+        H->>S: Initialize Notification Channel
+        S->>H: Generate temp session for notifications
+        H->>C: 200 OK + SSE Headers<br/>data: {"upgrade": "success"}
+        
+        Note over C,S: Notification Delivery
+        S->>H: Server Notification
+        H->>C: SSE Push<br/>data: {"type": "server_notification", ...}
+        
+        Note over C,S: Continue Regular /mcp Calls
+        C->>H: POST /mcp<br/>{"method": "tools/list"}
+        H->>S: Process Request (Still Stateless)
+        S->>H: {"result": {"tools": [...]}}
+        H->>C: 200 OK + Tools List
+    end
+```
+
 ## MCP Protocol Flow
 
 This diagram shows the typical request-response flow for MCP operations across all implementations.
@@ -199,18 +336,6 @@ sequenceDiagram
     S->>C: Prompt Content
 ```
 
-## Comparison of Implementations
-
-| Feature | SSE | STDIO | Streamable HTTP |
-|---------|-----|-------|----------------|
-| **Transport** | HTTP + SSE | stdin/stdout | HTTP Streaming |
-| **Port** | 8080 | N/A | 8081 |
-| **State** | Stateful | Stateful | Stateless |
-| **Keep-Alive** | Yes (10s) | N/A | No |
-| **Use Case** | Web browsers, real-time apps | CLI tools, process integration | REST APIs, microservices |
-| **Scalability** | Moderate | Single process | High (stateless) |
-| **Complexity** | Medium | Low | Medium |
-
 ## Getting Started
 
 ### SSE Server
@@ -245,4 +370,31 @@ All implementations share these components:
 
 ### Resources
 - **System Status**: Server status and uptime information (JSON)
-- **Math Constants**: Common mathematical constants (π, e, φ, √2) with descriptions 
+- **Math Constants**: Common mathematical constants (π, e, φ, √2) with descriptions
+
+## Quick Start Examples
+
+### STDIO Example
+```bash
+# Start the server process and communicate via pipes
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | ./bin/stdio
+```
+
+### SSE Example
+```bash
+# 1. Start server: ./bin/sse
+# 2. Open SSE connection: curl -N http://localhost:8080/sse
+# 3. Use session_id for operations: 
+curl -X POST "http://localhost:8080/message?session_id=abc123" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"tools/list","id":1}'
+```
+
+### Streamable HTTP Example
+```bash
+# 1. Start server: ./bin/streamable_http
+# 2. Direct MCP calls (no session needed):
+curl -X POST "http://localhost:8081/mcp" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"tools/list","id":1}'
+``` 
