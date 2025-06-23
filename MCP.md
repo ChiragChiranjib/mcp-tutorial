@@ -65,3 +65,6 @@ MCP Servers expose their functionality through three primary capabilities, allow
 *   **Resources**: Static or dynamically generated content that the MCP Clients can read for context, such as files, database records, or real-time status information. They provide a "snapshot" of data at a point in time.
 
 *   **Prompts**: Pre-defined, templated instructions that can be retrieved and used to guide the MCP Client's behavior for specific tasks, such as code reviews or specialized tutoring. 
+
+Model Context Protocol ref document for latest specification: 
+https://modelcontextprotocol.io/introduction
