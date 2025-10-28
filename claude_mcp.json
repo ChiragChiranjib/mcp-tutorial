@@ -1,17 +1,17 @@
 {
   "mcpServers": {
-    "tutorial-mcp-stdio": {
-      "command": "/Users/chirag.chiranjib/razorpay/golang/mcp/tutorial/bin/stdio",
+    "reconsaas-mcp-stdio": {
+      "command": "/Users/aditya.raj/Desktop/workspace/mcp-tutorial/bin/stdio",
       "args": []
     },
-    "tutorial-mcp-sse": {
+    "reconsaas-mcp-sse": {
       "command": "npx",
       "args": [
         "mcp-remote",
         "http://localhost:8080/sse"
       ]
     },
-    "tutorial-mcp-http": {
+    "reconsaas-mcp-http": {
       "command": "npx",
       "args": [
         "mcp-remote",

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "reconsaas-mcp-http": {
+      "transport": "http",
+      "url": "http://localhost:8081/mcp"
+    },
+    "reconsaas-mcp-sse": {
+      "transport": "http",
+      "url": "http://localhost:8080/sse"
+    },
+    "reconsaas-mcp-stdio": {
+      "transport": "stdio",
+      "command": "/Users/aditya.raj/Desktop/workspace/mcp-tutorial/bin/stdio"
+    }
+  }
+}

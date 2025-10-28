@@ -1,14 +1,14 @@
 {
   "mcpServers": {
-    "tutorial-mcp-stdio": {
-      "command": "/Users/chirag.chiranjib/razorpay/golang/mcp/tutorial/bin/stdio",
+    "reconsaas-mcp-stdio": {
+      "command": "/Users/aditya.raj/Desktop/workspace/mcp-tutorial/bin/stdio",
       "args": []
     },
-    "tutorial-mcp-sse": {
+    "reconsaas-mcp-sse": {
       "url": "http://localhost:8080/sse",
       "transport": "sse"
     },
-    "tutorial-mcp-http": {
+    "reconsaas-mcp-http": {
       "transport": "http",
       "url": "http://localhost:8081/mcp"
     }

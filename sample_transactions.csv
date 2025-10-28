@@ -1,0 +1,11 @@
+Transaction_ID,Date,Amount,Description,Merchant_Name,Card_Number
+TXN001,2024-01-15,150.75,Coffee Purchase,Starbucks,****1234
+TXN002,2024-01-15,89.99,Gas Station,Shell,****1234
+TXN003,2024-01-16,1200.00,Grocery Shopping,Walmart,****5678
+TXN004,2024-01-16,45.30,Restaurant,McDonald's,****1234
+TXN005,2024-01-17,299.99,Electronics,Best Buy,****9012
+TXN006,2024-01-17,25.50,Coffee Purchase,Starbucks,****1234
+TXN007,2024-01-18,750.00,Hotel Booking,Marriott,****5678
+TXN008,2024-01-18,15.99,Streaming Service,Netflix,****1234
+TXN009,2024-01-19,125.00,Clothing,H&M,****9012
+TXN010,2024-01-20,88.75,Gas Station,Exxon,****5678
