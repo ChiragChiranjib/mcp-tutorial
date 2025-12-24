@@ -276,6 +276,11 @@ func ReconFileAnalysisTool() server.ServerTool {
 func ReconMasterSourceTool() server.ServerTool {
 	tool := mcp.NewTool("recon_master_source",
 		mcp.WithDescription("Create master source configurations for recon-saas using file analysis data"),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local' (http://localhost:9400), 'dev' (https://recon-saas.dev.razorpay.in), or 'prod' (https://recon-saas.concierge.razorpay.com). Defaults to 'dev' if not specified."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
 		mcp.WithString("source1_name",
 			mcp.Description("Name for the first master source"),
 			mcp.Required(),
@@ -311,6 +316,9 @@ func ReconMasterSourceTool() server.ServerTool {
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Get environment (defaults to "dev" if not specified)
+		environment := request.GetString("environment", DefaultEnvironment)
+
 		source1Name, err := request.RequireString("source1_name")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -352,19 +360,21 @@ func ReconMasterSourceTool() server.ServerTool {
 		}
 
 		// Create master sources via API calls
-		masterSource1ID, err := createMasterSource(ctx, source1Name, source1Columns, source1EntityID, source1Amount)
+		masterSource1ID, err := createMasterSource(ctx, source1Name, source1Columns, source1EntityID, source1Amount, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create master source 1: %v", err)), nil
 		}
 
-		masterSource2ID, err := createMasterSource(ctx, source2Name, source2Columns, source2EntityID, source2Amount)
+		masterSource2ID, err := createMasterSource(ctx, source2Name, source2Columns, source2EntityID, source2Amount, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create master source 2: %v", err)), nil
 		}
 
 		result := map[string]interface{}{
-			"status":  "success",
-			"message": "Master sources created successfully",
+			"status":       "success",
+			"message":      "Master sources created successfully",
+			"environment":  GetEnvironmentName(environment),
+			"api_base_url": GetBaseURL(environment),
 			"created_sources": map[string]interface{}{
 				"source_1": map[string]interface{}{
 					"master_source_id":         masterSource1ID,
@@ -384,6 +394,7 @@ func ReconMasterSourceTool() server.ServerTool {
 				"master_source_id_2": masterSource2ID,
 				"source_1_name":      source1Name,
 				"source_2_name":      source2Name,
+				"environment":        environment,
 			},
 		}
 
@@ -401,6 +412,11 @@ func ReconMasterSourceTool() server.ServerTool {
 func ReconMerchantSourceTool() server.ServerTool {
 	tool := mcp.NewTool("recon_merchant_source",
 		mcp.WithDescription("Create merchant-specific source configurations for recon-saas"),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local' (http://localhost:9400), 'dev' (https://recon-saas.dev.razorpay.in), or 'prod' (https://recon-saas.concierge.razorpay.com). Defaults to 'dev' if not specified."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
 		mcp.WithString("merchant_id",
 			mcp.Description("Merchant identifier for this onboarding process"),
 			mcp.Required(),
@@ -429,6 +445,9 @@ func ReconMerchantSourceTool() server.ServerTool {
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Get environment (defaults to "dev" if not specified)
+		environment := request.GetString("environment", DefaultEnvironment)
+
 		merchantID, err := request.RequireString("merchant_id")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -461,19 +480,21 @@ func ReconMerchantSourceTool() server.ServerTool {
 		merchantSource2Name := generateMerchantSourceName(source2Name, namingStrategy, 2)
 
 		// Create merchant sources via API calls
-		merchantSource1ID, err := createMerchantSource(ctx, merchantID, masterSourceID1, merchantSource1Name)
+		merchantSource1ID, err := createMerchantSource(ctx, merchantID, masterSourceID1, merchantSource1Name, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create merchant source 1: %v", err)), nil
 		}
 
-		merchantSource2ID, err := createMerchantSource(ctx, merchantID, masterSourceID2, merchantSource2Name)
+		merchantSource2ID, err := createMerchantSource(ctx, merchantID, masterSourceID2, merchantSource2Name, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create merchant source 2: %v", err)), nil
 		}
 
 		result := map[string]interface{}{
-			"status":  "success",
-			"message": "Merchant sources created successfully",
+			"status":       "success",
+			"message":      "Merchant sources created successfully",
+			"environment":  GetEnvironmentName(environment),
+			"api_base_url": GetBaseURL(environment),
 			"execution_summary": map[string]interface{}{
 				"merchant_id":            merchantID,
 				"total_merchant_sources": 2,
@@ -502,6 +523,7 @@ func ReconMerchantSourceTool() server.ServerTool {
 				"merchant_source_id_2": merchantSource2ID,
 				"master_source_id_1":   masterSourceID1,
 				"master_source_id_2":   masterSourceID2,
+				"environment":          environment,
 			},
 		}
 
@@ -519,6 +541,11 @@ func ReconMerchantSourceTool() server.ServerTool {
 func ReconStateRuleTool() server.ServerTool {
 	tool := mcp.NewTool("recon_state_rule",
 		mcp.WithDescription("Create reconciliation states and corresponding rules for recon-saas"),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local' (http://localhost:9400), 'dev' (https://recon-saas.dev.razorpay.in), or 'prod' (https://recon-saas.concierge.razorpay.com). Defaults to 'dev' if not specified."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
 		mcp.WithString("merchant_id",
 			mcp.Description("Merchant identifier"),
 			mcp.Required(),
@@ -551,6 +578,9 @@ func ReconStateRuleTool() server.ServerTool {
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Get environment (defaults to "dev" if not specified)
+		environment := request.GetString("environment", DefaultEnvironment)
+
 		merchantID, err := request.RequireString("merchant_id")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -586,20 +616,22 @@ func ReconStateRuleTool() server.ServerTool {
 		}
 
 		// Create recon states
-		reconStates, err := createReconStates(ctx, merchantID, source1Name, source2Name)
+		reconStates, err := createReconStates(ctx, merchantID, source1Name, source2Name, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create recon states: %v", err)), nil
 		}
 
 		// Create rules with validation result
-		rules, err := createReconRulesWithValidation(ctx, merchantID, masterSourceID1, masterSourceID2, reconStates, validationResult)
+		rules, err := createReconRulesWithValidation(ctx, merchantID, masterSourceID1, masterSourceID2, environment, reconStates, validationResult)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create recon rules: %v", err)), nil
 		}
 
 		result := map[string]interface{}{
-			"status":  "success",
-			"message": "Recon states and rules created successfully",
+			"status":       "success",
+			"message":      "Recon states and rules created successfully",
+			"environment":  GetEnvironmentName(environment),
+			"api_base_url": GetBaseURL(environment),
 			"execution_summary": map[string]interface{}{
 				"merchant_id":               merchantID,
 				"total_recon_states":        len(reconStates),
@@ -616,6 +648,7 @@ func ReconStateRuleTool() server.ServerTool {
 				"master_source_id_2": masterSourceID2,
 				"recon_state_ids":    extractStateIDs(reconStates),
 				"rule_ids":           extractRuleIDs(rules),
+				"environment":        environment,
 			},
 		}
 
@@ -633,6 +666,11 @@ func ReconStateRuleTool() server.ServerTool {
 func ReconProcessSetupTool() server.ServerTool {
 	tool := mcp.NewTool("recon_process_setup",
 		mcp.WithDescription("Create lookup configurations and reconciliation processes for recon-saas"),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local' (http://localhost:9400), 'dev' (https://recon-saas.dev.razorpay.in), or 'prod' (https://recon-saas.concierge.razorpay.com). Defaults to 'dev' if not specified."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
 		mcp.WithString("merchant_id",
 			mcp.Description("Merchant identifier"),
 			mcp.Required(),
@@ -692,6 +730,9 @@ func ReconProcessSetupTool() server.ServerTool {
 	)
 
 	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Get environment (defaults to "dev" if not specified)
+		environment := request.GetString("environment", DefaultEnvironment)
+
 		merchantID, err := request.RequireString("merchant_id")
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -770,26 +811,28 @@ func ReconProcessSetupTool() server.ServerTool {
 		}
 
 		// Create lookup
-		lookupID, err := createLookup(ctx, merchantID, source1Name, source2Name)
+		lookupID, err := createLookup(ctx, merchantID, source1Name, source2Name, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create lookup: %v", err)), nil
 		}
 
 		// Create master recon process with column mappings
-		masterReconProcessID, err := createMasterReconProcess(ctx, source1Name, source2Name, lookupID, masterSourceID1, masterSourceID2, ruleIDs, source1Columns, source2Columns, source1EntityID, source2EntityID, source1Amount, source2Amount)
+		masterReconProcessID, err := createMasterReconProcess(ctx, source1Name, source2Name, lookupID, masterSourceID1, masterSourceID2, environment, ruleIDs, source1Columns, source2Columns, source1EntityID, source2EntityID, source1Amount, source2Amount)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create master recon process: %v", err)), nil
 		}
 
 		// Create merchant recon process
-		merchantReconProcessID, err := createMerchantReconProcess(ctx, merchantID, masterReconProcessID, merchantSourceID1, merchantSourceID2)
+		merchantReconProcessID, err := createMerchantReconProcess(ctx, merchantID, masterReconProcessID, merchantSourceID1, merchantSourceID2, environment)
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to create merchant recon process: %v", err)), nil
 		}
 
 		result := map[string]interface{}{
-			"status":  "success",
-			"message": "Reconciliation process setup completed successfully",
+			"status":       "success",
+			"message":      "Reconciliation process setup completed successfully",
+			"environment":  GetEnvironmentName(environment),
+			"api_base_url": GetBaseURL(environment),
 			"execution_summary": map[string]interface{}{
 				"merchant_id":          merchantID,
 				"process_name":         fmt.Sprintf("%s to %s Reconciliation", source1Name, source2Name),
@@ -819,6 +862,7 @@ func ReconProcessSetupTool() server.ServerTool {
 					"Configure automated file processing schedules",
 					"Set up reporting and alerting preferences",
 				},
+				"environment": environment,
 			},
 		}
 

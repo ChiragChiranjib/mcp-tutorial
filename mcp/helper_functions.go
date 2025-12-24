@@ -19,12 +19,51 @@ import (
 
 // Helper functions for recon-saas API interactions
 
-// Global configuration for recon-saas API
-//var BaseURL = "http://localhost:9400"
+// Environment constants for recon-saas API
+const (
+	EnvLocal = "local"
+	EnvDev   = "dev"
+	EnvProd  = "prod"
+)
 
-//var BaseURL = "https://recon-saas.dev.razorpay.in"
+// Environment base URLs
+var environmentURLs = map[string]string{
+	EnvLocal: "http://localhost:9400",
+	EnvDev:   "https://recon-saas.dev.razorpay.in",
+	EnvProd:  "https://recon-saas.concierge.razorpay.com",
+}
 
-var BaseURL = "https://recon-saas.concierge.razorpay.com"
+// DefaultEnvironment is the default environment when not specified
+const DefaultEnvironment = EnvDev
+
+// GetBaseURL returns the base URL for the specified environment
+// If environment is empty or invalid, it defaults to Dev environment
+func GetBaseURL(environment string) string {
+	env := strings.ToLower(strings.TrimSpace(environment))
+	if env == "" {
+		env = DefaultEnvironment
+	}
+	if url, ok := environmentURLs[env]; ok {
+		return url
+	}
+	// Default to Dev if unknown environment
+	return environmentURLs[EnvDev]
+}
+
+// GetEnvironmentName returns a formatted environment name for display
+func GetEnvironmentName(environment string) string {
+	env := strings.ToLower(strings.TrimSpace(environment))
+	switch env {
+	case EnvLocal:
+		return "Local"
+	case EnvDev:
+		return "Dev"
+	case EnvProd:
+		return "Prod"
+	default:
+		return "Dev"
+	}
+}
 
 // ValidationResult holds the result of validation mode processing
 type ValidationResult struct {
@@ -610,8 +649,11 @@ func minFloat(a, b float64) float64 {
 }
 
 // makeReconSaaSAPICall makes authenticated API calls to recon-saas service
-func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload interface{}) (map[string]interface{}, error) {
+// environment parameter specifies which environment to use (local, dev, prod)
+func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload interface{}, environment string) (map[string]interface{}, error) {
 	const authHeader = "Basic cmVjb24tc2FhczpyZWNvbi1zYWFz"
+
+	baseURL := GetBaseURL(environment)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -626,7 +668,7 @@ func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload 
 		reqBody = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, BaseURL+endpoint, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+endpoint, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
@@ -658,9 +700,12 @@ func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload 
 }
 
 // makeReconSaaSAPICallString makes authenticated API calls to recon-saas service and returns string response
-func makeReconSaaSAPICallString(ctx context.Context, method, endpoint string, payload interface{}) (string, error) {
+// environment parameter specifies which environment to use (local, dev, prod)
+func makeReconSaaSAPICallString(ctx context.Context, method, endpoint string, payload interface{}, environment string) (string, error) {
 
 	const authHeader = "Basic cmVjb24tc2FhczpyZWNvbi1zYWFz"
+
+	baseURL := GetBaseURL(environment)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -675,7 +720,7 @@ func makeReconSaaSAPICallString(ctx context.Context, method, endpoint string, pa
 		reqBody = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, BaseURL+endpoint, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, baseURL+endpoint, reqBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
@@ -709,7 +754,7 @@ func makeReconSaaSAPICallString(ctx context.Context, method, endpoint string, pa
 }
 
 // createMasterSource creates a master source via recon-saas API
-func createMasterSource(ctx context.Context, name, columnsJSON, entityIDColumn, amountColumn string) (string, error) {
+func createMasterSource(ctx context.Context, name, columnsJSON, entityIDColumn, amountColumn, environment string) (string, error) {
 	var columns []string
 	if err := json.Unmarshal([]byte(columnsJSON), &columns); err != nil {
 		return "", fmt.Errorf("invalid columns JSON: %v", err)
@@ -772,7 +817,7 @@ func createMasterSource(ctx context.Context, name, columnsJSON, entityIDColumn, 
 		"mapping_config": mappingConfig,
 	}
 
-	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/sources/create", payload)
+	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/sources/create", payload, environment)
 	if err != nil {
 		return "", err
 	}
@@ -785,7 +830,7 @@ func createMasterSource(ctx context.Context, name, columnsJSON, entityIDColumn, 
 }
 
 // createMerchantSource creates a merchant source via recon-saas API
-func createMerchantSource(ctx context.Context, merchantID, masterSourceID, name string) (string, error) {
+func createMerchantSource(ctx context.Context, merchantID, masterSourceID, name, environment string) (string, error) {
 	payload := map[string]interface{}{
 		"name":             name,
 		"merchant_id":      merchantID,
@@ -807,7 +852,7 @@ func createMerchantSource(ctx context.Context, merchantID, masterSourceID, name 
 	}
 
 	// Use the string-specific API call function for create_merchant endpoint
-	merchantSourceID, err := makeReconSaaSAPICallString(ctx, "POST", "/v1/admin-recon-saas/sources/create_merchant", payload)
+	merchantSourceID, err := makeReconSaaSAPICallString(ctx, "POST", "/v1/admin-recon-saas/sources/create_merchant", payload, environment)
 	if err != nil {
 		return "", err
 	}
@@ -821,7 +866,7 @@ func createMerchantSource(ctx context.Context, merchantID, masterSourceID, name 
 }
 
 // createReconStates creates reconciliation states via recon-saas API
-func createReconStates(ctx context.Context, merchantID, source1Name, source2Name string) (map[string]interface{}, error) {
+func createReconStates(ctx context.Context, merchantID, source1Name, source2Name, environment string) (map[string]interface{}, error) {
 	states := []map[string]interface{}{
 		{
 			"name":     "Reconciled",
@@ -856,7 +901,7 @@ func createReconStates(ctx context.Context, merchantID, source1Name, source2Name
 			"remarks":     state["remarks"],
 		}
 
-		result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/recon_state", payload)
+		result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/recon_state", payload, environment)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create state %s: %v", stateNames[i], err)
 		}
@@ -881,7 +926,7 @@ func createReconStates(ctx context.Context, merchantID, source1Name, source2Name
 }
 
 // createReconRules creates reconciliation rules via recon-saas API
-func createReconRules(ctx context.Context, merchantID, masterSourceID1, masterSourceID2 string, reconStates map[string]interface{}) (map[string]interface{}, error) {
+func createReconRules(ctx context.Context, merchantID, masterSourceID1, masterSourceID2, environment string, reconStates map[string]interface{}) (map[string]interface{}, error) {
 	// Extract recon state IDs
 	getStateID := func(stateName string) string {
 		if state, ok := reconStates[stateName].(map[string]interface{}); ok {
@@ -933,7 +978,7 @@ func createReconRules(ctx context.Context, merchantID, masterSourceID1, masterSo
 			"case_rule":      false,
 		}
 
-		result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/rule", payload)
+		result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/rule", payload, environment)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create rule %s: %v", ruleNames[i], err)
 		}
@@ -959,7 +1004,7 @@ func createReconRules(ctx context.Context, merchantID, masterSourceID1, masterSo
 }
 
 // createReconRulesWithValidation creates reconciliation rules via recon-saas API with validation
-func createReconRulesWithValidation(ctx context.Context, merchantID, masterSourceID1, masterSourceID2 string, reconStates map[string]interface{}, validationResult *ValidationResult) (map[string]interface{}, error) {
+func createReconRulesWithValidation(ctx context.Context, merchantID, masterSourceID1, masterSourceID2, environment string, reconStates map[string]interface{}, validationResult *ValidationResult) (map[string]interface{}, error) {
 	// Extract recon state IDs
 	getStateID := func(stateName string) string {
 		if state, ok := reconStates[stateName].(map[string]interface{}); ok {
@@ -1026,7 +1071,7 @@ func createReconRulesWithValidation(ctx context.Context, merchantID, masterSourc
 			"case_rule":      false,
 		}
 
-		result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/rule", payload)
+		result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/rule", payload, environment)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create rule %s: %v", ruleNames[i], err)
 		}
@@ -1063,7 +1108,7 @@ func createReconRulesWithValidation(ctx context.Context, merchantID, masterSourc
 }
 
 // createLookup creates a lookup configuration via recon-saas API
-func createLookup(ctx context.Context, merchantID, source1Name, source2Name string) (string, error) {
+func createLookup(ctx context.Context, merchantID, source1Name, source2Name, environment string) (string, error) {
 	payload := map[string]interface{}{
 		"name":        fmt.Sprintf("Entity Lookup for %s and %s", source1Name, source2Name),
 		"merchant_id": merchantID,
@@ -1075,7 +1120,7 @@ func createLookup(ctx context.Context, merchantID, source1Name, source2Name stri
 		},
 	}
 
-	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/lookup", payload)
+	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/lookup", payload, environment)
 	if err != nil {
 		return "", err
 	}
@@ -1088,7 +1133,7 @@ func createLookup(ctx context.Context, merchantID, source1Name, source2Name stri
 }
 
 // createMasterReconProcess creates a master reconciliation process via recon-saas API
-func createMasterReconProcess(ctx context.Context, source1Name, source2Name, lookupID, masterSourceID1, masterSourceID2 string, ruleIDs []string, source1Columns, source2Columns, source1EntityID, source2EntityID, source1Amount, source2Amount string) (string, error) {
+func createMasterReconProcess(ctx context.Context, source1Name, source2Name, lookupID, masterSourceID1, masterSourceID2, environment string, ruleIDs []string, source1Columns, source2Columns, source1EntityID, source2EntityID, source1Amount, source2Amount string) (string, error) {
 	processName := fmt.Sprintf("%s to %s Reconciliation", source1Name, source2Name)
 	productID := fmt.Sprintf("%s_%s",
 		strings.ToUpper(strings.ReplaceAll(source1Name[:3], " ", "")),
@@ -1197,7 +1242,7 @@ func createMasterReconProcess(ctx context.Context, source1Name, source2Name, loo
 		},
 	}
 
-	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/recon_process/master", payload)
+	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/recon_process/master", payload, environment)
 	if err != nil {
 		return "", err
 	}
@@ -1210,14 +1255,14 @@ func createMasterReconProcess(ctx context.Context, source1Name, source2Name, loo
 }
 
 // createMerchantReconProcess creates a merchant reconciliation process via recon-saas API
-func createMerchantReconProcess(ctx context.Context, merchantID, masterReconProcessID, merchantSourceID1, merchantSourceID2 string) (string, error) {
+func createMerchantReconProcess(ctx context.Context, merchantID, masterReconProcessID, merchantSourceID1, merchantSourceID2, environment string) (string, error) {
 	payload := map[string]interface{}{
 		"merchant_id":             merchantID,
 		"master_recon_process_id": masterReconProcessID,
 		"sources":                 []string{merchantSourceID1, merchantSourceID2},
 	}
 
-	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/recon_process/merchant", payload)
+	result, err := makeReconSaaSAPICall(ctx, "POST", "/v1/admin-recon-saas/recon_process/merchant", payload, environment)
 	if err != nil {
 		return "", err
 	}

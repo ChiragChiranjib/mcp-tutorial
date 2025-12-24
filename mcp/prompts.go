@@ -430,7 +430,7 @@ Generate descriptive names based on %s type:
 - 422 Unprocessable Entity: Business logic errors
 
 Configuration mode: %s
-Provide complete API payloads, execute calls, and capture all master_source_id values.`, sourceType, BaseURL, configMode)
+Provide complete API payloads, execute calls, and capture all master_source_id values.`, sourceType, GetBaseURL(DefaultEnvironment), configMode)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -558,7 +558,7 @@ Standard merchant config with %s upload:
 - source_schema is explicitly set to null
 - mapping_config is explicitly set to null
 
-Capture both merchant_source_id values to complete merchant source configuration.`, merchantID, namingStrategy, merchantID, BaseURL, namingStrategy, uploadConfig, uploadEnabled)
+Capture both merchant_source_id values to complete merchant source configuration.`, merchantID, namingStrategy, merchantID, GetBaseURL(DefaultEnvironment), namingStrategy, uploadConfig, uploadEnabled)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -702,7 +702,7 @@ The tool will display complete reconciliation state and rule creation results in
 - Rule expressions follow correct syntax
 - User has approved all expressions
 
-Capture all recon_state_id and rule_id values to complete reconciliation logic setup.`, matchingStrategy, BaseURL, BaseURL, validationMode, matchingStrategy, validationMode)
+Capture all recon_state_id and rule_id values to complete reconciliation logic setup.`, matchingStrategy, GetBaseURL(DefaultEnvironment), GetBaseURL(DefaultEnvironment), validationMode, matchingStrategy, validationMode)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -845,7 +845,7 @@ Upon successful completion, the merchant onboarding process will be complete and
 - Dashboard monitoring and reporting
 - Scheduling and alerting configuration
 
-Execute all API calls sequentially, capture all response IDs, and provide comprehensive completion summary.`, lookupStrategy, processType, BaseURL, BaseURL, BaseURL, lookupStrategy, reportingConfig, reportingConfig)
+Execute all API calls sequentially, capture all response IDs, and provide comprehensive completion summary.`, lookupStrategy, processType, GetBaseURL(DefaultEnvironment), GetBaseURL(DefaultEnvironment), GetBaseURL(DefaultEnvironment), lookupStrategy, reportingConfig, reportingConfig)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
