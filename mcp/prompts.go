@@ -385,7 +385,7 @@ func ReconMasterSourcePrompt() server.ServerPrompt {
 - **Amount**: Selected amount column maps to "Amount"
 
 **API CONFIGURATION:**
-- **Endpoint**: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/sources/create
+- **Endpoint**: %s/v1/admin-recon-saas/sources/create
 - **Method**: POST
 - **Content-Type**: application/json
 - **Authorization**: Basic cmVjb24tc2FhczpyZWNvbi1zYWFz
@@ -430,7 +430,7 @@ Generate descriptive names based on %s type:
 - 422 Unprocessable Entity: Business logic errors
 
 Configuration mode: %s
-Provide complete API payloads, execute calls, and capture all master_source_id values.`, sourceType, configMode)
+Provide complete API payloads, execute calls, and capture all master_source_id values.`, sourceType, BaseURL, configMode)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -515,7 +515,7 @@ func ReconMerchantSourcePrompt() server.ServerPrompt {
 - merchant_id: Merchant identifier (required if not provided: %s)
 
 **API CONFIGURATION:**
-- **Endpoint**: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/sources/create_merchant
+- **Endpoint**: %s/v1/admin-recon-saas/sources/create_merchant
 - **Method**: POST
 - **Content-Type**: application/json
 - **Authorization**: Basic cmVjb24tc2FhczpyZWNvbi1zYWFz
@@ -558,7 +558,7 @@ Standard merchant config with %s upload:
 - source_schema is explicitly set to null
 - mapping_config is explicitly set to null
 
-Capture both merchant_source_id values to complete merchant source configuration.`, merchantID, namingStrategy, merchantID, namingStrategy, uploadConfig, uploadEnabled)
+Capture both merchant_source_id values to complete merchant source configuration.`, merchantID, namingStrategy, merchantID, BaseURL, namingStrategy, uploadConfig, uploadEnabled)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -619,11 +619,11 @@ func ReconStateRulePrompt() server.ServerPrompt {
 
 **API CONFIGURATION:**
 **Recon State Endpoint:**
-- URL: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/recon_state
+- URL: %s/v1/admin-recon-saas/recon_state
 - Method: POST
 
 **Rule Endpoint:**
-- URL: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/rule
+- URL: %s/v1/admin-recon-saas/rule
 - Method: POST
 
 **RECON STATE CREATION WORKFLOW:**
@@ -702,7 +702,7 @@ The tool will display complete reconciliation state and rule creation results in
 - Rule expressions follow correct syntax
 - User has approved all expressions
 
-Capture all recon_state_id and rule_id values to complete reconciliation logic setup.`, matchingStrategy, validationMode, matchingStrategy, validationMode)
+Capture all recon_state_id and rule_id values to complete reconciliation logic setup.`, matchingStrategy, BaseURL, BaseURL, validationMode, matchingStrategy, validationMode)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -779,15 +779,15 @@ func ReconProcessSetupPrompt() server.ServerPrompt {
 **API CONFIGURATION:**
 
 **Lookup Endpoint:**
-- URL: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/lookup
+- URL: %s/v1/admin-recon-saas/lookup
 - Method: POST
 
 **Master Recon Process Endpoint:**
-- URL: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/recon_process/master
+- URL: %s/v1/admin-recon-saas/recon_process/master
 - Method: POST
 
 **Merchant Recon Process Endpoint:**
-- URL: https://recon-saas.dev.razorpay.in/v1/admin-recon-saas/recon_process/merchant
+- URL: %s/v1/admin-recon-saas/recon_process/merchant
 - Method: POST
 
 **EXECUTION WORKFLOW:**
@@ -845,7 +845,7 @@ Upon successful completion, the merchant onboarding process will be complete and
 - Dashboard monitoring and reporting
 - Scheduling and alerting configuration
 
-Execute all API calls sequentially, capture all response IDs, and provide comprehensive completion summary.`, lookupStrategy, processType, reportingConfig, lookupStrategy, reportingConfig, reportingConfig)
+Execute all API calls sequentially, capture all response IDs, and provide comprehensive completion summary.`, lookupStrategy, processType, BaseURL, BaseURL, BaseURL, lookupStrategy, reportingConfig, reportingConfig)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(

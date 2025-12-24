@@ -19,6 +19,13 @@ import (
 
 // Helper functions for recon-saas API interactions
 
+// Global configuration for recon-saas API
+//var BaseURL = "http://localhost:9400"
+
+//var BaseURL = "https://recon-saas.dev.razorpay.in"
+
+var BaseURL = "https://recon-saas.razorpay.com"
+
 // ValidationResult holds the result of validation mode processing
 type ValidationResult struct {
 	Mode             string            `json:"mode"`
@@ -604,7 +611,6 @@ func minFloat(a, b float64) float64 {
 
 // makeReconSaaSAPICall makes authenticated API calls to recon-saas service
 func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload interface{}) (map[string]interface{}, error) {
-	const baseURL = "https://recon-saas.dev.razorpay.in"
 	const authHeader = "Basic cmVjb24tc2FhczpyZWNvbi1zYWFz"
 
 	client := &http.Client{
@@ -620,7 +626,7 @@ func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload 
 		reqBody = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+endpoint, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, BaseURL+endpoint, reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
@@ -653,7 +659,7 @@ func makeReconSaaSAPICall(ctx context.Context, method, endpoint string, payload 
 
 // makeReconSaaSAPICallString makes authenticated API calls to recon-saas service and returns string response
 func makeReconSaaSAPICallString(ctx context.Context, method, endpoint string, payload interface{}) (string, error) {
-	const baseURL = "https://recon-saas.dev.razorpay.in"
+
 	const authHeader = "Basic cmVjb24tc2FhczpyZWNvbi1zYWFz"
 
 	client := &http.Client{
@@ -669,7 +675,7 @@ func makeReconSaaSAPICallString(ctx context.Context, method, endpoint string, pa
 		reqBody = bytes.NewReader(payloadBytes)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, baseURL+endpoint, reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, BaseURL+endpoint, reqBody)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}

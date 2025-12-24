@@ -200,7 +200,7 @@ You are an intelligent MCP server tool designed to generate master source config
 ### API Configuration
 
 - **Endpoint**: `{{recon-saas_base_url}}/v1/admin-recon-saas/sources/create`
-- {{recon-saas_base_url}} = https://recon-saas.dev.razorpay.in
+- {{recon-saas_base_url}} = http://localhost:9400 (now configurable via BaseURL variable)
 - **Method**: POST
 - **Content-Type**: application/json
 - **Authorization**: use basic auth with key as "Authorization" and value "Basic cmVjb24tc2FhczpyZWNvbi1zYWFz"
