@@ -24,7 +24,7 @@ import (
 
 //var BaseURL = "https://recon-saas.dev.razorpay.in"
 
-var BaseURL = "https://recon-saas.razorpay.com"
+var BaseURL = "https://recon-saas.concierge.razorpay.com"
 
 // ValidationResult holds the result of validation mode processing
 type ValidationResult struct {
