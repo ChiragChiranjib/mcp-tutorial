@@ -885,7 +885,7 @@ func createReconStates(ctx context.Context, merchantID, source1Name, source2Name
 		},
 		{
 			"name":     "Unreconciled",
-			"priority": 3,
+			"priority": 4,
 			"remarks":  fmt.Sprintf("Record not found in %s", source2Name),
 		},
 	}
