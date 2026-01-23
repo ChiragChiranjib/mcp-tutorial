@@ -865,3 +865,296 @@ Execute all API calls sequentially, capture all response IDs, and provide compre
 		Handler: handler,
 	}
 }
+
+// ReconEntityUpdatePrompt Entity update prompt for modifying recon-saas configurations
+func ReconEntityUpdatePrompt() server.ServerPrompt {
+	prompt := mcp.NewPrompt("recon_entity_update",
+		mcp.WithPromptDescription("Update existing recon-saas entities including master sources, merchant sources, recon processes, rules, recon states, and lookups"),
+		mcp.WithArgument("entity_type",
+			mcp.ArgumentDescription("Type of entity to update (master_source, merchant_source, master_recon_process, merchant_recon_process, rule, recon_state, lookup)"),
+		),
+		mcp.WithArgument("update_scope",
+			mcp.ArgumentDescription("Scope of the update (single_field, multiple_fields, complete_reconfiguration)"),
+		),
+	)
+
+	handler := func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		entityType := "general"
+		if et, exists := request.Params.Arguments["entity_type"]; exists && et != "" {
+			entityType = et
+		}
+
+		updateScope := "single_field"
+		if us, exists := request.Params.Arguments["update_scope"]; exists && us != "" {
+			updateScope = us
+		}
+
+		elaboratePrompt := fmt.Sprintf(`You are an intelligent MCP server tool designed to update existing recon-saas entities. Your responsibility is to make PATCH API calls to modify configurations for various entity types.
+
+**CORE RESPONSIBILITIES:**
+
+**Entity Update Operations:**
+- Update existing entity configurations via PATCH API calls
+- Validate update payloads before submission
+- Handle partial updates (only modified fields)
+- Return updated entity state after successful modification
+
+**SUPPORTED ENTITY TYPES (%s focus):**
+
+1. **master_source** - Master source configurations
+   - Endpoint: /v1/admin-recon-saas/sources/update/{id}
+   - Updatable fields: name, skip_top_rows, ingest_to_db, allow_upload, unique_keys, source_schema, mapping_config, transformation_config, validation_config, sub_source_config, extract_distinct_config, report_enrichment, split_file_basis, is_header_missing, metadata_extraction_config, skip_bottom_rows, skip_row_func
+
+2. **merchant_source** - Merchant-specific source configurations
+   - Endpoint: /v1/admin-recon-saas/sources/update_merchant/{id}
+   - Updatable fields: name, master_source_id, reporting_emails, cc_emails, bcc_emails, allow_upload, source_schema, mapping_config, validation_config, split_file_basis, beam_sftp_push_job, slack_notification_config
+
+3. **master_recon_process** - Master reconciliation process
+   - Endpoint: /v1/admin-recon-saas/recon_process/master/{id}
+   - Updatable fields: name, lookup_config, product_id, rules, sources, sequence, report_config, workflow_config
+
+4. **merchant_recon_process** - Merchant reconciliation process
+   - Endpoint: /v1/admin-recon-saas/recon_process/merchant/{id}
+   - Updatable fields: sources, report_config, skip_status, skip_rows, skip_rows_recon_state_ids, report_channel, status
+
+5. **rule** - Reconciliation rules
+   - Endpoint: /v1/admin-recon-saas/rule/{id}
+   - Updatable fields: name, type, expression, sources, recon_state_id
+
+6. **recon_state** - Reconciliation states
+   - Endpoint: /v1/admin-recon-saas/recon_state/{id}
+   - Updatable fields: name, priority, remarks
+
+7. **lookup** - Lookup configurations
+   - Endpoint: /v1/admin-recon-saas/lookup/{id}
+   - Updatable fields: name, config
+
+**UPDATE WORKFLOW (%s scope):**
+
+**Step 1: Identify Entity**
+- Obtain entity_type and entity_id from user
+- Validate entity exists (optional GET call)
+
+**Step 2: Prepare Update Payload**
+- Collect fields to update from user
+- Validate field names match entity type
+- Construct JSON payload with only changed fields
+
+**Step 3: Execute PATCH Request**
+- Make PATCH API call to appropriate endpoint
+- Handle authentication (Basic auth)
+- Process response and error handling
+
+**Step 4: Verify Update**
+- Display updated entity from response
+- Confirm changes were applied correctly
+- Report any validation or business logic errors
+
+**COMMON UPDATE SCENARIOS:**
+
+**Master Source Updates:**
+- Change source name: {"name": "New Source Name"}
+- Update schema: {"source_schema": [{"name": "col1", "type": "string"}]}
+- Modify mappings: {"mapping_config": [{"source": "col1", "destination": "EntityID", "value": ""}]}
+
+**Merchant Source Updates:**
+- Update email recipients: {"reporting_emails": ["new@email.com"], "cc_emails": ["cc@email.com"]}
+- Enable/disable uploads: {"allow_upload": true}
+- Configure Slack alerts: {"slack_notification_config": {"recon_percentage_threshold": 90, "file_alert_enabled": true}}
+
+**Rule Updates:**
+- Modify expression: {"expression": "SourceA.EntityID == SourceB.EntityID"}
+- Change associated state: {"recon_state_id": "new_state_id"}
+- Update rule name: {"name": "Updated Rule Name"}
+
+**Recon State Updates:**
+- Change priority: {"priority": 1}
+- Update remarks: {"remarks": "Updated description"}
+
+**Process Updates:**
+- Update sources: {"sources": ["source1", "source2"]}
+- Change status: {"status": "approved"}
+- Modify report config: {"report_config": {...}}
+
+**API CONFIGURATION:**
+- Base URL: %s
+- Method: PATCH
+- Content-Type: application/json
+- Authorization: Basic cmVjb24tc2FhczpyZWNvbi1zYWFz
+
+**ERROR HANDLING:**
+- 400 Bad Request: Invalid payload structure or field values
+- 401 Unauthorized: Authentication failure
+- 404 Not Found: Entity ID does not exist
+- 422 Unprocessable Entity: Business logic validation errors
+- 500 Internal Server Error: Server-side issues
+
+**VALIDATION CHECKLIST:**
+- entity_id is valid and non-empty
+- entity_type matches supported types
+- update_payload contains valid field names
+- Field values match expected types
+- Required relationships exist (e.g., recon_state_id for rules)
+
+Please provide the entity type, entity ID, and the fields you want to update.`, entityType, updateScope, GetBaseURL(DefaultEnvironment))
+
+		messages := []mcp.PromptMessage{
+			mcp.NewPromptMessage(
+				mcp.RoleUser,
+				mcp.NewTextContent(elaboratePrompt),
+			),
+		}
+
+		return mcp.NewGetPromptResult(
+			fmt.Sprintf("Recon-SaaS Entity Update: %s (%s)", entityType, updateScope),
+			messages,
+		), nil
+	}
+
+	return server.ServerPrompt{
+		Prompt:  prompt,
+		Handler: handler,
+	}
+}
+
+// ReconTransformationConfigPrompt Transformation configuration prompt for applying data transformations
+func ReconTransformationConfigPrompt() server.ServerPrompt {
+	prompt := mcp.NewPrompt("recon_transformation_config",
+		mcp.WithPromptDescription("Apply data transformations to recon-saas master source columns with intelligent function selection"),
+		mcp.WithArgument("transformation_type",
+			mcp.ArgumentDescription("Type of transformation needed (amount_parsing, column_concatenation, date_formatting, string_extraction, calculation)"),
+		),
+	)
+
+	handler := func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		transformationType := "general"
+		if tt, exists := request.Params.Arguments["transformation_type"]; exists && tt != "" {
+			transformationType = tt
+		}
+
+		elaboratePrompt := fmt.Sprintf(`You are an intelligent MCP server tool designed to apply data transformations to recon-saas master sources. Your responsibility is to understand the user's transformation needs and apply the correct transformation function.
+
+**TRANSFORMATION WORKFLOW:**
+
+When a user asks to apply a transformation:
+1. Identify which source they're referring to (Source A, Source B, or by name)
+2. Identify the column(s) involved
+3. Determine the appropriate transformation function
+4. Ask for the output column name if creating a new column
+5. Apply the transformation using the recon_transformation_config tool
+
+**AVAILABLE TRANSFORMATION FUNCTIONS (%s focus):**
+
+**Amount/Number Transformations:**
+- abs_amount_parsing: Parse absolute amount (removes commas, handles negatives)
+- abs_amount_in_paisa: Convert to paisa (multiply by 100)
+- add_amount_cols: Sum multiple amount columns
+- subtract_amount_cols: Subtract amounts from base
+- percentage_of_number: Calculate percentage
+- extract_amount_from_cols: Get first non-zero from multiple columns
+
+**String Transformations:**
+- append_multiple_columns: Concatenate multiple columns
+- excel_mid: Extract substring from middle
+- excel_left: Extract from left
+- excel_right: Extract from right
+- split: Split by delimiter and get part
+- regex_exec: Extract using regex
+- remove_prefix: Remove prefix
+- remove_suffix: Remove suffix
+- add_padding_prefix: Zero-pad to length
+- replace_blank_string: Trim whitespace
+- remove_single_quotes: Remove single quotes
+- remove_double_quotes: Remove double quotes
+
+**Date Transformations:**
+- change_date_format: Convert between date formats
+- date_normalization: Normalize to YYYY-MM-DD
+- txn_date_extraction_generic: Parse various date formats including unix timestamps
+- excel_to_datetime: Convert Excel serial date
+- subtract_date: Subtract days
+- add_date: Add days
+
+**Other Transformations:**
+- hard_code_value: Set constant value
+- settlement_amount_from_debit_credit_cols: Derive from debit/credit
+- get_field_from_notes: Extract from JSON notes
+
+**EXAMPLE SCENARIOS:**
+
+**Scenario 1: Parse Absolute Amount**
+User: "For Source A, I want Subtotal to parse absolute amount and store it in Amount"
+Action:
+- transformation_function: "abs_amount_parsing"
+- input_columns: ["Subtotal"]
+- output_column: "Amount"
+- Update mapping_config: Change Subtotal destination from "Amount" to "subtotal", add new mapping for "Amount"
+
+**Scenario 2: Concatenate Columns**
+User: "For Source B, combine RRN, TID, and MID into EntityID"
+Action:
+- transformation_function: "append_multiple_columns"
+- input_columns: ["RRN", "TID", "MID"]
+- output_column: "EntityID"
+- Update mapping_config: Change RRN destination from "EntityID" to "rrn", add new mapping for "EntityID"
+
+**Scenario 3: Change Date Format**
+User: "Change Invoice Date format from MM/DD/YYYY to YYYY-MM-DD in Source A"
+Action:
+- transformation_function: "change_date_format"
+- input_columns: ["Invoice Date"]
+- additional_params: ["%%m/%%d/%%Y", "%%Y-%%m-%%d"]
+- output_column: "Invoice Date" (same column, in-place transformation)
+- mapping_config: Unchanged (same column)
+
+**Scenario 4: Extract Substring**
+User: "Extract the UTR from the description field starting at position 10 for 12 characters"
+Action:
+- transformation_function: "excel_mid"
+- input_columns: ["description"]
+- additional_params: [10, 12]
+- output_column: "utr"
+- Add new mapping for "utr"
+
+**IMPORTANT RULES:**
+
+1. **Column References**: Always use $ prefix for columns in the logic: "$column_name"
+
+2. **Output Columns**: When transformation creates a new column that will be used for EntityID or Amount:
+   - If an existing column was mapped to EntityID/Amount, remap it to snake_case
+   - Add the new transformation output as the new EntityID/Amount source
+
+3. **Mapping Config Updates**: 
+   - If output_column matches an existing destination (like "Amount" or "EntityID"), the original source column needs remapping
+   - Original column gets snake_case destination, new transformation output gets the special destination
+
+4. **Ask for Clarification**:
+   - Which source? (Source A, Source B, or by name)
+   - Which columns are involved?
+   - What should the output column be named?
+   - For date formats: what is the current format and desired format?
+
+**API ENDPOINT:**
+Uses PATCH to /v1/admin-recon-saas/sources/update/{master_source_id}
+Updates both transformation_config and mapping_config in a single call.
+
+Please describe the transformation you want to apply, and I'll help you configure it correctly.`, transformationType)
+
+		messages := []mcp.PromptMessage{
+			mcp.NewPromptMessage(
+				mcp.RoleUser,
+				mcp.NewTextContent(elaboratePrompt),
+			),
+		}
+
+		return mcp.NewGetPromptResult(
+			fmt.Sprintf("Recon-SaaS Transformation Config: %s", transformationType),
+			messages,
+		), nil
+	}
+
+	return server.ServerPrompt{
+		Prompt:  prompt,
+		Handler: handler,
+	}
+}

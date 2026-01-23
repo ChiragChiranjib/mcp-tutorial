@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -867,6 +868,678 @@ func ReconProcessSetupTool() server.ServerTool {
 		}
 
 		resultJSON, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: handler,
+	}
+}
+
+// ReconEntityUpdateTool provides a unified tool for updating various recon-saas entities
+// Supports PATCH operations for: master_source, merchant_source, master_recon_process,
+// merchant_recon_process, rule, recon_state, and lookup
+func ReconEntityUpdateTool() server.ServerTool {
+	tool := mcp.NewTool("recon_entity_update",
+		mcp.WithDescription(`Update recon-saas entities via PATCH API calls.
+
+This tool supports updating the following entity types:
+- master_source: Update master source configurations (name, schema, mappings, transformations, validations, etc.)
+- merchant_source: Update merchant-specific source configurations (name, master_source_id, emails, mappings, etc.)
+- master_recon_process: Update master reconciliation process (name, lookup_config, rules, sources, sequence, report_config, workflow_config)
+- merchant_recon_process: Update merchant reconciliation process (sources, report_config, skip_status, skip_rows, status, etc.)
+- rule: Update reconciliation rules (name, type, expression, sources, recon_state_id)
+- recon_state: Update reconciliation states (name, priority, remarks)
+- lookup: Update lookup configurations (name, config)
+
+USAGE EXAMPLES:
+
+1. Update a master source name:
+   entity_type: "master_source"
+   entity_id: "abc123"
+   update_payload: {"name": "New Source Name"}
+
+2. Update a rule expression:
+   entity_type: "rule"
+   entity_id: "rule456"
+   update_payload: {"expression": "SourceA.EntityID == SourceB.EntityID", "name": "Updated Rule"}
+
+3. Update merchant source emails:
+   entity_type: "merchant_source"
+   entity_id: "ms789"
+   update_payload: {"reporting_emails": ["user@example.com"], "cc_emails": ["cc@example.com"]}
+
+4. Update recon state priority:
+   entity_type: "recon_state"
+   entity_id: "state123"
+   update_payload: {"priority": 2, "remarks": "Updated remarks"}
+
+5. Update master recon process rules:
+   entity_type: "master_recon_process"
+   entity_id: "mrp456"
+   update_payload: {"name": "Updated Process Name", "rules": {"rule_ids": ["rule1", "rule2"]}}
+
+6. Update merchant recon process status:
+   entity_type: "merchant_recon_process"
+   entity_id: "merchant_proc_789"
+   update_payload: {"status": "approved", "skip_status": true}
+
+7. Update lookup configuration:
+   entity_type: "lookup"
+   entity_id: "lookup123"
+   update_payload: {"name": "Updated Lookup", "config": [{"source": "record_internal", "columns": ["EntityID", "Amount"]}]}
+
+FIELD REFERENCES:
+
+master_source fields:
+  - name (string): Source name
+  - skip_top_rows (int): Rows to skip from top
+  - ingest_to_db (bool): Whether to ingest to database
+  - allow_upload (bool): Allow file uploads
+  - unique_keys ([]string): Unique key columns
+  - source_schema (array): Column schema definitions [{name: string, type: string}]
+  - mapping_config (array): Column mapping configurations [{source: string, destination: string, value: string}]
+  - transformation_config (array): Data transformation rules [{logic: object, output_columns: []string}]
+  - validation_config (object): Validation rules {logics: [{logic: object}]}
+  - sub_source_config (object): Sub-source configuration
+  - extract_distinct_config ([]string): Distinct extraction columns
+  - report_enrichment (bool): Enable report enrichment
+  - split_file_basis (string): File splitting strategy
+  - row_hash_value_based_split_config (object): Row hash based split config
+  - column_value_based_split_config (object): Column value based split config
+  - is_header_missing (bool): If file has no header row
+  - metadata_extraction_config (object): Metadata extraction config
+  - skip_bottom_rows (int): Rows to skip from bottom
+  - skip_row_func (string): Custom row skip function
+
+merchant_source fields:
+  - name (string): Source name
+  - master_source_id (string): Associated master source ID
+  - reporting_emails ([]string): Report recipient emails
+  - cc_emails ([]string): CC email addresses
+  - bcc_emails ([]string): BCC email addresses
+  - allow_upload (bool): Allow file uploads
+  - source_schema (array): Custom column schema
+  - mapping_config (array): Custom column mappings
+  - validation_config (object): Custom validation rules
+  - split_file_basis (string): File splitting strategy
+  - row_hash_value_based_split_config (object): Row hash based split config
+  - column_value_based_split_config (object): Column value based split config
+  - beam_sftp_push_job (string): SFTP push job name
+  - slack_notification_config (object): Slack notification settings {recon_percentage_threshold: float, file_alert_enabled: bool, file_alert_cron: string, number_of_files_to_check: int}
+
+master_recon_process fields:
+  - name (string): Process name
+  - lookup_config (array): Lookup configurations [{config: {source_id: lookup_id}, streaming_source_id: string}]
+  - product_id (string): Product identifier
+  - rules (object): Rule configuration {rule_ids: []string}
+  - sources ([]string): Master source IDs
+  - sequence (array): Processing sequence
+  - report_config (object): Reporting configuration {frontend_cols: []string, source_report_config: array}
+  - workflow_config (object): Workflow settings
+
+merchant_recon_process fields:
+  - sources ([]string): Merchant source IDs
+  - report_config (object): Reporting configuration
+  - skip_status (bool): Skip status processing
+  - skip_rows (bool): Skip certain rows
+  - skip_rows_recon_state_ids ([]string): Recon state IDs to skip
+  - report_channel ([]string): Report delivery channels
+  - status (string): Process status (approved/pending_approval)
+
+rule fields:
+  - name (string): Rule name
+  - type (string): Rule type (recon)
+  - expression (string): Rule expression (e.g., "SourceA.EntityID == SourceB.EntityID && SourceA.Amount.Equal(SourceB.Amount)")
+  - sources ([]string): Source IDs this rule applies to
+  - recon_state_id (string): Associated recon state ID
+
+recon_state fields:
+  - name (string): State name (Reconciled/Unreconciled)
+  - priority (int8): Priority level (1-10, lower = higher priority)
+  - remarks (string): State description/remarks
+
+lookup fields:
+  - name (string): Lookup name
+  - config (array): Lookup configuration [{source: string, columns: []string, aggregation: object, advanced_config: object, lookback_config: object}]
+`),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local' (http://localhost:9400), 'dev' (https://recon-saas.dev.razorpay.in), or 'prod' (https://recon-saas.concierge.razorpay.com). Defaults to 'dev' if not specified."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
+		mcp.WithString("entity_type",
+			mcp.Description("Type of entity to update"),
+			mcp.Required(),
+			mcp.Enum("master_source", "merchant_source", "master_recon_process", "merchant_recon_process", "rule", "recon_state", "lookup"),
+		),
+		mcp.WithString("entity_id",
+			mcp.Description("ID of the entity to update"),
+			mcp.Required(),
+		),
+		mcp.WithString("update_payload",
+			mcp.Description("JSON object containing fields to update. Only include fields you want to change. See tool description for available fields per entity type."),
+			mcp.Required(),
+		),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		// Get environment (defaults to "dev" if not specified)
+		environment := request.GetString("environment", DefaultEnvironment)
+
+		entityType, err := request.RequireString("entity_type")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		entityID, err := request.RequireString("entity_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		updatePayloadJSON, err := request.RequireString("update_payload")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Parse the update payload
+		var updatePayload map[string]interface{}
+		if err := json.Unmarshal([]byte(updatePayloadJSON), &updatePayload); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid update_payload JSON: %v", err)), nil
+		}
+
+		if len(updatePayload) == 0 {
+			return mcp.NewToolResultError("update_payload cannot be empty"), nil
+		}
+
+		// Determine the endpoint based on entity type
+		var endpoint string
+		switch entityType {
+		case "master_source":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/sources/update/%s", entityID)
+		case "merchant_source":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/sources/update_merchant/%s", entityID)
+		case "master_recon_process":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/recon_process/master/%s", entityID)
+		case "merchant_recon_process":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/recon_process/merchant/%s", entityID)
+		case "rule":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/rule/%s", entityID)
+		case "recon_state":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/recon_state/%s", entityID)
+		case "lookup":
+			endpoint = fmt.Sprintf("/v1/admin-recon-saas/lookup/%s", entityID)
+		default:
+			return mcp.NewToolResultError(fmt.Sprintf("Unsupported entity type: %s", entityType)), nil
+		}
+
+		// Make the PATCH API call
+		result, err := makeReconSaaSAPICall(ctx, "PATCH", endpoint, updatePayload, environment)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to update %s: %v", entityType, err)), nil
+		}
+
+		// Build response
+		response := map[string]interface{}{
+			"status":         "success",
+			"message":        fmt.Sprintf("%s updated successfully", entityType),
+			"environment":    GetEnvironmentName(environment),
+			"api_base_url":   GetBaseURL(environment),
+			"entity_type":    entityType,
+			"entity_id":      entityID,
+			"updated_fields": getUpdatedFieldNames(updatePayload),
+			"api_response":   result,
+		}
+
+		resultJSON, _ := json.MarshalIndent(response, "", "  ")
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: handler,
+	}
+}
+
+// getUpdatedFieldNames extracts field names from the update payload for logging
+func getUpdatedFieldNames(payload map[string]interface{}) []string {
+	fields := make([]string, 0, len(payload))
+	for key := range payload {
+		fields = append(fields, key)
+	}
+	return fields
+}
+
+// toSnakeCase converts a string to snake_case
+// Examples: "Invoice Date" -> "invoice_date", "CustomerName" -> "customer_name"
+func toSnakeCase(s string) string {
+	// First, replace spaces with underscores and convert to lowercase
+	result := strings.ToLower(strings.ReplaceAll(s, " ", "_"))
+
+	// Handle camelCase by inserting underscores before uppercase letters
+	var snakeCase strings.Builder
+	for i, r := range result {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			snakeCase.WriteRune('_')
+		}
+		snakeCase.WriteRune(r)
+	}
+
+	// Clean up any double underscores
+	return strings.ReplaceAll(snakeCase.String(), "__", "_")
+}
+
+// ReconTransformationConfigTool provides intelligent transformation configuration for master sources
+// This tool understands all available transformation functions and helps users apply them correctly
+func ReconTransformationConfigTool() server.ServerTool {
+	tool := mcp.NewTool("recon_transformation_config",
+		mcp.WithDescription(`Intelligently configure transformations for recon-saas master sources.
+
+This tool helps you apply data transformations to master source columns. It understands the user's intent
+and generates the correct transformation_config and updates mapping_config when necessary.
+
+AVAILABLE TRANSFORMATION FUNCTIONS:
+
+1. **abs_amount_parsing** - Parse absolute amount (removes commas, handles nulls)
+   - Input: Single column containing amount
+   - Example: {"logic": {"abs_amount_parsing": ["$Subtotal"]}, "output_columns": ["Amount"]}
+   - Use case: "Parse Subtotal as absolute amount and store in Amount"
+
+2. **append_multiple_columns** - Concatenate multiple columns into one
+   - Input: Multiple columns to concatenate
+   - Example: {"logic": {"append_multiple_columns": ["$RRN", "$TID", "$MID"]}, "output_columns": ["EntityID"]}
+   - Use case: "Combine RRN, TID, MID into EntityID"
+
+3. **change_date_format** - Convert date from one format to another
+   - Input: Column, from_format, to_format
+   - Example: {"logic": {"change_date_format": ["$Invoice Date", "%m/%d/%Y", "%Y-%m-%d"]}, "output_columns": ["Invoice Date"]}
+   - Use case: "Change Invoice Date format from MM/DD/YYYY to YYYY-MM-DD"
+
+4. **date_normalization** - Normalize date to YYYY-MM-DD format
+   - Input: Column, current_format
+   - Example: {"logic": {"date_normalization": ["$txn_date", "%d-%m-%Y"]}, "output_columns": ["txn_date"]}
+   - Use case: "Normalize txn_date to standard format"
+
+5. **txn_date_extraction_generic** - Extract and parse transaction date (supports unix timestamps, fuzzy matching)
+   - Input: Column, optional format (dd-mm-yyyy, dd/mm/yyyy)
+   - Example: {"logic": {"txn_date_extraction_generic": ["$timestamp"]}, "output_columns": ["txn_date"]}
+   - Use case: "Extract transaction date from timestamp column"
+
+6. **add_amount_cols** - Add multiple amount columns together
+   - Input: Multiple amount columns
+   - Example: {"logic": {"add_amount_cols": ["$base_amount", "$tax", "$fee"]}, "output_columns": ["total_amount"]}
+   - Use case: "Sum base_amount, tax, and fee into total_amount"
+
+7. **subtract_amount_cols** - Subtract amounts from a base column
+   - Input: Base column, columns to subtract
+   - Example: {"logic": {"subtract_amount_cols": ["$gross", "$discount", "$tax"]}, "output_columns": ["net_amount"]}
+   - Use case: "Subtract discount and tax from gross to get net_amount"
+
+8. **abs_amount_in_paisa** - Convert amount to paisa (multiply by 100)
+   - Input: Single amount column
+   - Example: {"logic": {"abs_amount_in_paisa": ["$amount"]}, "output_columns": ["amount_paisa"]}
+   - Use case: "Convert amount to paisa"
+
+9. **excel_mid** - Extract substring from middle (like Excel MID)
+   - Input: Column, start_position, length, optional prefix
+   - Example: {"logic": {"excel_mid": ["$description", 5, 10]}, "output_columns": ["extracted_id"]}
+   - Use case: "Extract 10 characters starting from position 5 of description"
+
+10. **excel_left** - Extract characters from left
+    - Input: Column, length
+    - Example: {"logic": {"excel_left": ["$code", 4]}, "output_columns": ["prefix"]}
+    - Use case: "Extract first 4 characters from code"
+
+11. **excel_right** - Extract characters from right
+    - Input: Column, length
+    - Example: {"logic": {"excel_right": ["$code", 6]}, "output_columns": ["suffix"]}
+    - Use case: "Extract last 6 characters from code"
+
+12. **split** - Split string and get specific part
+    - Input: Column, delimiter, index
+    - Example: {"logic": {"split": ["$reference", "/", 2]}, "output_columns": ["part3"]}
+    - Use case: "Split reference by '/' and get the 3rd part (index 2)"
+
+13. **regex_exec** - Extract using regex pattern
+    - Input: Column, regex_pattern
+    - Example: {"logic": {"regex_exec": ["$narration", "[A-Z]{4}[0-9]{12}"]}, "output_columns": ["utr"]}
+    - Use case: "Extract UTR pattern from narration"
+
+14. **remove_prefix** - Remove prefix from string
+    - Input: Column, prefixes to remove
+    - Example: {"logic": {"remove_prefix": ["$txn_id", "TXN-", "PAY-"]}, "output_columns": ["clean_id"]}
+    - Use case: "Remove TXN- or PAY- prefix from txn_id"
+
+15. **remove_suffix** - Remove suffix from string
+    - Input: Column, suffixes to remove
+    - Example: {"logic": {"remove_suffix": ["$reference", "-REF", "-ID"]}, "output_columns": ["clean_ref"]}
+    - Use case: "Remove -REF or -ID suffix from reference"
+
+16. **add_padding_prefix** - Add zero padding to fixed length
+    - Input: Column, desired_length
+    - Example: {"logic": {"add_padding_prefix": ["$id", 10]}, "output_columns": ["padded_id"]}
+    - Use case: "Pad id with zeros to make it 10 characters"
+
+17. **hard_code_value** - Set a constant value
+    - Input: Constant value
+    - Example: {"logic": {"hard_code_value": ["ACTIVE"]}, "output_columns": ["status"]}
+    - Use case: "Set status column to constant value 'ACTIVE'"
+
+18. **settlement_amount_from_debit_credit_cols** - Derive settlement amount from debit/credit columns
+    - Input: Debit column, Credit column
+    - Example: {"logic": {"settlement_amount_from_debit_credit_cols": ["$debit", "$credit"]}, "output_columns": ["settlement_amount"]}
+    - Use case: "Calculate settlement amount from debit and credit columns"
+
+19. **percentage_of_number** - Calculate percentage
+    - Input: Base amount, percentage
+    - Example: {"logic": {"percentage_of_number": ["$amount", 18]}, "output_columns": ["tax"]}
+    - Use case: "Calculate 18% of amount"
+
+20. **extract_amount_from_cols** - Extract first non-zero amount from multiple columns
+    - Input: Multiple amount columns
+    - Example: {"logic": {"extract_amount_from_cols": ["$amount1", "$amount2", "$amount3"]}, "output_columns": ["final_amount"]}
+    - Use case: "Get first non-zero amount from amount1, amount2, or amount3"
+
+21. **excel_to_datetime** - Convert Excel serial date to datetime
+    - Input: Excel date column
+    - Example: {"logic": {"excel_to_datetime": ["$excel_date"]}, "output_columns": ["date"]}
+    - Use case: "Convert Excel serial date number to readable date"
+
+22. **subtract_date** - Subtract days from a date
+    - Input: Date column, days to subtract
+    - Example: {"logic": {"subtract_date": ["$date", 7]}, "output_columns": ["week_ago"]}
+    - Use case: "Get date 7 days before"
+
+23. **add_date** - Add days to a date
+    - Input: Date column, days to add
+    - Example: {"logic": {"add_date": ["$date", 30]}, "output_columns": ["due_date"]}
+    - Use case: "Add 30 days to date for due_date"
+
+24. **get_field_from_notes** - Extract field from JSON notes
+    - Input: Notes column, field names to try
+    - Example: {"logic": {"get_field_from_notes": ["$notes", "order_id", "txn_id"]}, "output_columns": ["extracted_id"]}
+    - Use case: "Extract order_id or txn_id from JSON notes field"
+
+25. **replace_blank_string** - Trim whitespace from string
+    - Input: Column
+    - Example: {"logic": {"replace_blank_string": ["$name"]}, "output_columns": ["name"]}
+    - Use case: "Trim whitespace from name column"
+
+26. **remove_single_quotes** - Remove single quotes from string
+    - Input: Column
+    - Example: {"logic": {"remove_single_quotes": ["$value"]}, "output_columns": ["value"]}
+    - Use case: "Remove single quotes from value"
+
+27. **remove_double_quotes** - Remove double quotes from string
+    - Input: Column
+    - Example: {"logic": {"remove_double_quotes": ["$value"]}, "output_columns": ["value"]}
+    - Use case: "Remove double quotes from value"
+
+WORKFLOW:
+1. Identify the source and columns involved
+2. Determine the transformation function needed
+3. Ask for output column name if creating a new column
+4. Generate transformation_config
+5. Update mapping_config if new column is created
+6. Apply changes via PATCH API
+
+IMPORTANT RULES:
+- Column references in logic use $ prefix: "$column_name"
+- output_columns contains the destination column name without $ prefix
+- When output_column is different from existing mapped columns, add to mapping_config
+- When output_column replaces an existing mapped column, update mapping_config
+- MAPPING DESTINATION NAMING:
+  - Special columns keep their name: EntityID, EntityStatus, EntityIdentifier, Amount
+  - All other columns are converted to snake_case (e.g., "Invoice Date" -> "invoice_date")
+  - Example: output_column="Amount" -> destination="Amount" (special)
+  - Example: output_column="total_value" -> destination="total_value" (already snake_case)
+  - Example: output_column="Net Amount" -> destination="net_amount" (converted)
+`),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local', 'dev', or 'prod'. Defaults to 'dev'."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
+		mcp.WithString("master_source_id",
+			mcp.Description("ID of the master source to apply transformation to"),
+			mcp.Required(),
+		),
+		mcp.WithString("source_name",
+			mcp.Description("Name of the source for reference (e.g., 'Source A', 'POS Transactions')"),
+			mcp.Required(),
+		),
+		mcp.WithString("transformation_function",
+			mcp.Description("The transformation function to apply"),
+			mcp.Required(),
+			mcp.Enum(
+				"abs_amount_parsing",
+				"append_multiple_columns",
+				"change_date_format",
+				"date_normalization",
+				"txn_date_extraction_generic",
+				"add_amount_cols",
+				"subtract_amount_cols",
+				"abs_amount_in_paisa",
+				"excel_mid",
+				"excel_left",
+				"excel_right",
+				"split",
+				"regex_exec",
+				"remove_prefix",
+				"remove_suffix",
+				"add_padding_prefix",
+				"hard_code_value",
+				"settlement_amount_from_debit_credit_cols",
+				"percentage_of_number",
+				"extract_amount_from_cols",
+				"excel_to_datetime",
+				"subtract_date",
+				"add_date",
+				"get_field_from_notes",
+				"replace_blank_string",
+				"remove_single_quotes",
+				"remove_double_quotes",
+			),
+		),
+		mcp.WithString("input_columns",
+			mcp.Description("JSON array of input column names (from the source file). Example: [\"Subtotal\"] or [\"RRN\", \"TID\", \"MID\"]"),
+			mcp.Required(),
+		),
+		mcp.WithString("additional_params",
+			mcp.Description("JSON array of additional parameters for the function (if needed). Example: [\"%m/%d/%Y\", \"%Y-%m-%d\"] for change_date_format, or [5, 10] for excel_mid"),
+		),
+		mcp.WithString("output_column",
+			mcp.Description("Name of the output column where the transformation result will be stored"),
+			mcp.Required(),
+		),
+		mcp.WithString("current_mapping_config",
+			mcp.Description("JSON array of current mapping_config from the master source. This is needed to properly update mappings."),
+			mcp.Required(),
+		),
+		mcp.WithString("current_transformation_config",
+			mcp.Description("JSON array of current transformation_config from the master source. Empty array [] if no transformations exist yet."),
+		),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		environment := request.GetString("environment", DefaultEnvironment)
+
+		masterSourceID, err := request.RequireString("master_source_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		sourceName, err := request.RequireString("source_name")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		transformationFunction, err := request.RequireString("transformation_function")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		inputColumnsJSON, err := request.RequireString("input_columns")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		outputColumn, err := request.RequireString("output_column")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		currentMappingConfigJSON, err := request.RequireString("current_mapping_config")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		additionalParamsJSON := request.GetString("additional_params", "[]")
+		currentTransformationConfigJSON := request.GetString("current_transformation_config", "[]")
+
+		// Parse input columns
+		var inputColumns []string
+		if err := json.Unmarshal([]byte(inputColumnsJSON), &inputColumns); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid input_columns JSON: %v", err)), nil
+		}
+
+		// Parse additional params
+		var additionalParams []interface{}
+		if err := json.Unmarshal([]byte(additionalParamsJSON), &additionalParams); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid additional_params JSON: %v", err)), nil
+		}
+
+		// Parse current mapping config
+		var currentMappingConfig []map[string]interface{}
+		if err := json.Unmarshal([]byte(currentMappingConfigJSON), &currentMappingConfig); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid current_mapping_config JSON: %v", err)), nil
+		}
+
+		// Parse current transformation config
+		var currentTransformationConfig []map[string]interface{}
+		if currentTransformationConfigJSON != "" && currentTransformationConfigJSON != "[]" {
+			if err := json.Unmarshal([]byte(currentTransformationConfigJSON), &currentTransformationConfig); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Invalid current_transformation_config JSON: %v", err)), nil
+			}
+		}
+
+		// Build the transformation logic arguments
+		logicArgs := make([]interface{}, 0)
+		for _, col := range inputColumns {
+			logicArgs = append(logicArgs, "$"+col)
+		}
+		for _, param := range additionalParams {
+			logicArgs = append(logicArgs, param)
+		}
+
+		// Create new transformation entry
+		newTransformation := map[string]interface{}{
+			"logic": map[string]interface{}{
+				transformationFunction: logicArgs,
+			},
+			"output_columns": []string{outputColumn},
+		}
+
+		// Append to existing transformations
+		updatedTransformationConfig := append(currentTransformationConfig, newTransformation)
+
+		// Check if output column needs to be added to mapping_config
+		updatedMappingConfig := make([]map[string]interface{}, len(currentMappingConfig))
+		copy(updatedMappingConfig, currentMappingConfig)
+
+		outputColumnExists := false
+		outputColumnIsDestination := false
+
+		for i, mapping := range updatedMappingConfig {
+			dest, _ := mapping["destination"].(string)
+			source, _ := mapping["source"].(string)
+
+			// Check if output column already exists as a destination
+			if dest == outputColumn {
+				outputColumnExists = true
+				outputColumnIsDestination = true
+				break
+			}
+
+			// Check if an input column is currently mapped to the output column destination
+			// and needs to be remapped
+			for _, inputCol := range inputColumns {
+				if source == inputCol && dest == outputColumn {
+					// This input column was previously mapped to our output column
+					// We need to remap it to a different destination (snake_case)
+					newDest := toSnakeCase(inputCol)
+					updatedMappingConfig[i] = map[string]interface{}{
+						"value":       "",
+						"source":      inputCol,
+						"destination": newDest,
+					}
+				}
+			}
+		}
+
+		// If output column doesn't exist as a destination, add it
+		if !outputColumnIsDestination {
+			// Determine the destination name based on whether it's a special column
+			specialColumns := map[string]bool{
+				"EntityID":         true,
+				"EntityStatus":     true,
+				"EntityIdentifier": true,
+				"Amount":           true,
+			}
+
+			destination := outputColumn
+			if !specialColumns[outputColumn] {
+				// Convert to snake_case for non-special columns
+				destination = toSnakeCase(outputColumn)
+			}
+
+			// Add new mapping for the transformation output
+			newMapping := map[string]interface{}{
+				"value":       "",
+				"source":      outputColumn,
+				"destination": destination,
+			}
+			updatedMappingConfig = append(updatedMappingConfig, newMapping)
+		}
+
+		// Prepare the update payload
+		updatePayload := map[string]interface{}{
+			"transformation_config": updatedTransformationConfig,
+			"mapping_config":        updatedMappingConfig,
+		}
+
+		// Make the PATCH API call
+		endpoint := fmt.Sprintf("/v1/admin-recon-saas/sources/update/%s", masterSourceID)
+		result, err := makeReconSaaSAPICall(ctx, "PATCH", endpoint, updatePayload, environment)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to update master source: %v", err)), nil
+		}
+
+		// Build comprehensive response
+		response := map[string]interface{}{
+			"status":      "success",
+			"message":     fmt.Sprintf("Transformation applied successfully to %s", sourceName),
+			"environment": GetEnvironmentName(environment),
+			"source_details": map[string]interface{}{
+				"master_source_id": masterSourceID,
+				"source_name":      sourceName,
+			},
+			"transformation_applied": map[string]interface{}{
+				"function":       transformationFunction,
+				"input_columns":  inputColumns,
+				"output_column":  outputColumn,
+				"transformation": newTransformation,
+			},
+			"updated_configs": map[string]interface{}{
+				"transformation_config": updatedTransformationConfig,
+				"mapping_config":        updatedMappingConfig,
+				"output_column_existed": outputColumnExists,
+			},
+			"api_response": result,
+		}
+
+		resultJSON, _ := json.MarshalIndent(response, "", "  ")
 		return mcp.NewToolResultText(string(resultJSON)), nil
 	}
 
