@@ -37,8 +37,6 @@ func main() {
 	)
 
 	mcpServer.AddTools(
-		mcp.CalculatorTool(),
-		mcp.SystemInfoTool(),
 		// Recon-SaaS tools
 		mcp.ReconFileAnalysisTool(),
 		mcp.ReconMasterSourceTool(),
@@ -47,11 +45,10 @@ func main() {
 		mcp.ReconProcessSetupTool(),
 		mcp.ReconEntityUpdateTool(),
 		mcp.ReconTransformationConfigTool(),
+		mcp.ReconAggregationTool(),
 	)
 
 	mcpServer.AddPrompts(
-		mcp.MathTutorPrompt(),
-		mcp.CodeReviewPrompt(),
 		// Recon-SaaS prompts
 		mcp.ReconFileAnalysisPrompt(),
 		mcp.ReconMasterSourcePrompt(),
@@ -60,6 +57,7 @@ func main() {
 		mcp.ReconProcessSetupPrompt(),
 		mcp.ReconEntityUpdatePrompt(),
 		mcp.ReconTransformationConfigPrompt(),
+		mcp.ReconAggregationConfigPrompt(),
 	)
 
 	mcpServer.AddResources(

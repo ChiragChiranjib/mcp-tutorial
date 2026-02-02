@@ -1020,7 +1020,7 @@ Please provide the entity type, entity ID, and the fields you want to update.`, 
 // ReconTransformationConfigPrompt Transformation configuration prompt for applying data transformations
 func ReconTransformationConfigPrompt() server.ServerPrompt {
 	prompt := mcp.NewPrompt("recon_transformation_config",
-		mcp.WithPromptDescription("Apply data transformations to recon-saas master source columns with intelligent function selection"),
+		mcp.WithPromptDescription("Apply data transformations to recon-saas master source columns ONLY when explicitly requested by the user"),
 		mcp.WithArgument("transformation_type",
 			mcp.ArgumentDescription("Type of transformation needed (amount_parsing, column_concatenation, date_formatting, string_extraction, calculation)"),
 		),
@@ -1034,111 +1034,203 @@ func ReconTransformationConfigPrompt() server.ServerPrompt {
 
 		elaboratePrompt := fmt.Sprintf(`You are an intelligent MCP server tool designed to apply data transformations to recon-saas master sources. Your responsibility is to understand the user's transformation needs and apply the correct transformation function.
 
-**TRANSFORMATION WORKFLOW:**
+**CRITICAL: DO NOT AUTO-APPLY TRANSFORMATIONS**
 
-When a user asks to apply a transformation:
-1. Identify which source they're referring to (Source A, Source B, or by name)
-2. Identify the column(s) involved
-3. Determine the appropriate transformation function
-4. Ask for the output column name if creating a new column
-5. Apply the transformation using the recon_transformation_config tool
+This tool should ONLY be used when the user EXPLICITLY requests a transformation. Do NOT automatically apply any transformation unless the user specifically asks for it.
 
-**AVAILABLE TRANSFORMATION FUNCTIONS (%s focus):**
+**WHEN TO USE THIS TOOL:**
+- User says: "Apply regex on column X to extract EntityID" → USE this tool
+- User says: "Concatenate columns A, B, C to create EntityID for Source X" → USE this tool
+- User says: "Transform the date format from X to Y" → USE this tool
+- User says: "I need to apply a transformation on [column] with [master source]" → USE this tool
 
-**Amount/Number Transformations:**
+**WHEN NOT TO USE THIS TOOL:**
+- During normal master source creation → DO NOT use
+- During file analysis → DO NOT use
+- During onboarding flow unless explicitly asked → DO NOT use
+- When user doesn't mention transformation, regex, concatenation, or data formatting → DO NOT use
+- When analyzing columns or suggesting mappings → DO NOT use (just suggest, don't apply)
+
+**REQUIRED USER CONFIRMATION:**
+Before applying ANY transformation, you MUST have explicit confirmation from the user about:
+1. Which master source (by name or ID) to apply the transformation to
+2. Which column(s) to transform
+3. What transformation function to use
+4. What the output column should be named
+
+If any of these are unclear, ASK the user. Do NOT assume or auto-apply.
+
+**SMART CONTEXT USAGE:**
+
+Before asking questions, CHECK THE CONVERSATION CONTEXT for information from previous tool calls:
+- If recon_master_source tool was used, master_source_id should be available from its response
+- If recon_file_analysis tool was used, column names are available
+- The tool can AUTO-FETCH current mapping_config and transformation_config via GET API using master_source_id
+
+**WHAT YOU NEED TO CONFIRM WITH USER:**
+
+Only ask for information that is NOT already available in the conversation:
+1. Which source? (Source A, Source B, or the exact source name) - if not clear from context
+2. What is the master_source_id? - if not available from previous tool calls
+3. Which column(s) should be transformed? - ALWAYS confirm this
+4. What should be the output column name? - ALWAYS confirm this
+5. For specific functions, ask for required parameters:
+   - regex_exec: What regex pattern?
+   - change_date_format: What is the source format and target format?
+   - excel_mid: What start position and length?
+   - split: What delimiter and which part (index)?
+   - etc.
+
+**AUTO-FETCH CAPABILITY:**
+
+If you have the master_source_id, the tool will automatically fetch:
+- Current mapping_config (all existing column mappings)
+- Current transformation_config (existing transformations)
+
+This is done via GET API: /v1/admin-recon-saas/sources/get/{master_source_id}
+So you do NOT need to ask user for current_mapping_config or current_transformation_config!
+
+**TRANSFORMATION WORKFLOW (%s focus):**
+
+Step 1: WAIT FOR EXPLICIT USER REQUEST
+- DO NOT proactively suggest or apply transformations
+- Only proceed if user explicitly asks for a transformation
+
+Step 2: CHECK CONTEXT
+- Look for master_source_id from previous recon_master_source tool calls
+- Look for column names from previous recon_file_analysis tool calls
+- Identify which source the user is referring to
+
+Step 3: CONFIRM WITH USER (only what's missing)
+- Input column(s) - which column(s) to transform
+- Output column name - what to call the result
+- Function-specific parameters (regex, date format, etc.)
+
+Step 4: APPLY TRANSFORMATION (only after explicit confirmation)
+- Call recon_transformation_config tool
+- The tool will auto-fetch current configs if not provided
+- All existing mappings are preserved automatically
+
+**MAPPING CONFIG UPDATE LOGIC (Handled automatically by the tool):**
+
+Special columns: EntityID, EntityStatus, EntityIdentifier, Amount
+
+When output_column is a SPECIAL column (e.g., EntityID):
+1. Find existing mapping where destination = special column
+2. Change that mapping's destination to snake_case of its source
+3. Append new mapping: {source: special_column, destination: special_column}
+
+Example:
+- Before: [{"source": "Notes", "destination": "EntityID"}, {"source": "amount", "destination": "Amount"}]
+- Transformation output_column: "EntityID"
+- After: [{"source": "Notes", "destination": "notes"}, {"source": "amount", "destination": "Amount"}, {"source": "EntityID", "destination": "EntityID"}]
+
+When output_column is NOT a special column:
+1. Append new mapping: {source: output_column, destination: snake_case(output_column)}
+
+**AVAILABLE TRANSFORMATION FUNCTIONS:**
+
+**Amount/Number:**
 - abs_amount_parsing: Parse absolute amount (removes commas, handles negatives)
 - abs_amount_in_paisa: Convert to paisa (multiply by 100)
 - add_amount_cols: Sum multiple amount columns
 - subtract_amount_cols: Subtract amounts from base
-- percentage_of_number: Calculate percentage
+- percentage_of_number: Calculate percentage (params: [base_amount, percentage])
 - extract_amount_from_cols: Get first non-zero from multiple columns
 
-**String Transformations:**
+**String:**
 - append_multiple_columns: Concatenate multiple columns
-- excel_mid: Extract substring from middle
-- excel_left: Extract from left
-- excel_right: Extract from right
-- split: Split by delimiter and get part
-- regex_exec: Extract using regex
-- remove_prefix: Remove prefix
-- remove_suffix: Remove suffix
-- add_padding_prefix: Zero-pad to length
+- excel_mid: Extract substring (params: [start_pos, length])
+- excel_left: Extract from left (params: [length])
+- excel_right: Extract from right (params: [length])
+- split: Split and get part (params: [delimiter, index])
+- regex_exec: Extract using regex (params: [regex_pattern])
+- remove_prefix: Remove prefix (params: [prefix1, prefix2, ...])
+- remove_suffix: Remove suffix (params: [suffix1, suffix2, ...])
+- add_padding_prefix: Zero-pad (params: [target_length])
 - replace_blank_string: Trim whitespace
-- remove_single_quotes: Remove single quotes
-- remove_double_quotes: Remove double quotes
+- remove_single_quotes, remove_double_quotes: Remove quotes
 
-**Date Transformations:**
-- change_date_format: Convert between date formats
-- date_normalization: Normalize to YYYY-MM-DD
-- txn_date_extraction_generic: Parse various date formats including unix timestamps
+**Date:**
+- change_date_format: Convert formats (params: [from_format, to_format])
+- date_normalization: Normalize to YYYY-MM-DD (params: [current_format])
+- txn_date_extraction_generic: Parse various date formats
 - excel_to_datetime: Convert Excel serial date
-- subtract_date: Subtract days
-- add_date: Add days
+- subtract_date, add_date: Add/subtract days (params: [days])
 
-**Other Transformations:**
-- hard_code_value: Set constant value
+**Other:**
+- hard_code_value: Set constant (params: [value])
 - settlement_amount_from_debit_credit_cols: Derive from debit/credit
-- get_field_from_notes: Extract from JSON notes
+- get_field_from_notes: Extract from JSON (params: [field1, field2, ...])
 
-**EXAMPLE SCENARIOS:**
+**EXAMPLE CONVERSATIONS:**
 
-**Scenario 1: Parse Absolute Amount**
-User: "For Source A, I want Subtotal to parse absolute amount and store it in Amount"
-Action:
-- transformation_function: "abs_amount_parsing"
-- input_columns: ["Subtotal"]
-- output_column: "Amount"
-- Update mapping_config: Change Subtotal destination from "Amount" to "subtotal", add new mapping for "Amount"
+**Example 1: User explicitly requests transformation**
 
-**Scenario 2: Concatenate Columns**
-User: "For Source B, combine RRN, TID, and MID into EntityID"
-Action:
-- transformation_function: "append_multiple_columns"
-- input_columns: ["RRN", "TID", "MID"]
+[Previous context: recon_master_source returned master_source_id: "S9W6Gpbw6OWbYo" for "Source A"]
+
+User: "I want to apply regex on notes column in Source A to extract EntityID"
+
+Assistant should ask:
+"I have the master_source_id 'S9W6Gpbw6OWbYo' for Source A from our previous setup. 
+What regex pattern should I use to extract the EntityID from the notes column?"
+
+User: "[0-9]{7}"
+
+Then call the tool (configs auto-fetched):
+- master_source_id: "S9W6Gpbw6OWbYo"
+- source_name: "Source A"
+- transformation_function: "regex_exec"
+- input_columns: ["notes"]
+- additional_params: ["[0-9]{7}"]
 - output_column: "EntityID"
-- Update mapping_config: Change RRN destination from "EntityID" to "rrn", add new mapping for "EntityID"
+(current_mapping_config and current_transformation_config will be auto-fetched via GET API)
 
-**Scenario 3: Change Date Format**
-User: "Change Invoice Date format from MM/DD/YYYY to YYYY-MM-DD in Source A"
-Action:
-- transformation_function: "change_date_format"
-- input_columns: ["Invoice Date"]
-- additional_params: ["%%m/%%d/%%Y", "%%Y-%%m-%%d"]
-- output_column: "Invoice Date" (same column, in-place transformation)
-- mapping_config: Unchanged (same column)
+**Example 2: User explicitly requests concatenation**
 
-**Scenario 4: Extract Substring**
-User: "Extract the UTR from the description field starting at position 10 for 12 characters"
-Action:
-- transformation_function: "excel_mid"
-- input_columns: ["description"]
-- additional_params: [10, 12]
-- output_column: "utr"
-- Add new mapping for "utr"
+User: "For Source B, combine RRN, TID and MID to create EntityID"
 
-**IMPORTANT RULES:**
+Assistant should ask:
+"I'll concatenate these columns. Just to confirm:
+- Input columns: RRN, TID, MID
+- Output column: EntityID
+What is the master_source_id for Source B?" (if not in context)
 
-1. **Column References**: Always use $ prefix for columns in the logic: "$column_name"
+**Example 3: User explicitly requests date format change**
 
-2. **Output Columns**: When transformation creates a new column that will be used for EntityID or Amount:
-   - If an existing column was mapped to EntityID/Amount, remap it to snake_case
-   - Add the new transformation output as the new EntityID/Amount source
+User: "Change the date format of created_at column from MM/DD/YYYY to YYYY-MM-DD"
 
-3. **Mapping Config Updates**: 
-   - If output_column matches an existing destination (like "Amount" or "EntityID"), the original source column needs remapping
-   - Original column gets snake_case destination, new transformation output gets the special destination
+Assistant should ask:
+"Which source should I apply this to? Also, just to confirm:
+- Input column: created_at
+- Current format: %%m/%%d/%%Y
+- Target format: %%Y-%%m-%%d
+- Output column: Should it update the same column (created_at) or create a new one?"
 
-4. **Ask for Clarification**:
-   - Which source? (Source A, Source B, or by name)
-   - Which columns are involved?
-   - What should the output column be named?
-   - For date formats: what is the current format and desired format?
+**Example 4: User does NOT request transformation - DO NOT APPLY**
 
-**API ENDPOINT:**
-Uses PATCH to /v1/admin-recon-saas/sources/update/{master_source_id}
-Updates both transformation_config and mapping_config in a single call.
+User: "Create master sources for my two files"
+→ DO NOT apply any transformation. Just create the master sources.
 
-Please describe the transformation you want to apply, and I'll help you configure it correctly.`, transformationType)
+User: "Analyze my files and set up reconciliation"
+→ DO NOT apply any transformation. Complete the setup without transformations.
+
+**TOOL PARAMETERS:**
+
+Required:
+- master_source_id: ID of the master source
+- source_name: Name for reference
+- transformation_function: Function name from the list above
+- input_columns: JSON array of input column names
+- output_column: Name of the output column
+
+Optional (auto-fetched if not provided):
+- current_mapping_config: Current mapping config JSON array
+- current_transformation_config: Current transformations, defaults to []
+- additional_params: JSON array of extra parameters for the function
+- environment: "local", "dev", or "prod" (defaults to "dev")
+
+REMEMBER: Only apply transformations when the user EXPLICITLY requests them!`, transformationType)
 
 		messages := []mcp.PromptMessage{
 			mcp.NewPromptMessage(
@@ -1149,6 +1241,168 @@ Please describe the transformation you want to apply, and I'll help you configur
 
 		return mcp.NewGetPromptResult(
 			fmt.Sprintf("Recon-SaaS Transformation Config: %s", transformationType),
+			messages,
+		), nil
+	}
+
+	return server.ServerPrompt{
+		Prompt:  prompt,
+		Handler: handler,
+	}
+}
+
+// ReconAggregationConfigPrompt Aggregation configuration prompt for enabling aggregation on master sources
+func ReconAggregationConfigPrompt() server.ServerPrompt {
+	prompt := mcp.NewPrompt("recon_aggregation_config",
+		mcp.WithPromptDescription("Configure aggregation for recon-saas master sources ONLY when explicitly requested by the user"),
+	)
+
+	handler := func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+		elaboratePrompt := `You are an intelligent MCP server tool designed to configure aggregation for recon-saas master sources. Your responsibility is to enable aggregation on a specific column when the user explicitly requests it.
+
+**CRITICAL: DO NOT AUTO-APPLY AGGREGATION**
+
+This tool should ONLY be used when the user EXPLICITLY requests aggregation configuration.
+Do NOT automatically apply aggregation during normal onboarding or master source creation.
+
+**WHEN TO USE THIS TOOL:**
+- User explicitly says: "Enable aggregation on column X"
+- User explicitly says: "Configure aggregation for EntityIdentifier"
+- User explicitly says: "Set up aggregation with column X as EntityIdentifier"
+- User explicitly says: "I want to aggregate on column X"
+- User explicitly says: "Apply aggregation on [column] for [master source]"
+
+**WHEN NOT TO USE THIS TOOL:**
+- During normal master source creation
+- During file analysis
+- During onboarding flow (unless user explicitly asks for aggregation)
+- When user doesn't mention aggregation
+
+**WHAT AGGREGATION DOES:**
+
+Aggregation allows multiple records with the same EntityID to be grouped together based on a secondary identifier (EntityIdentifier). This is useful when:
+- You have multiple line items per transaction
+- You need to sum amounts across related records
+- You want to reconcile at a parent-child level
+
+**REQUIRED INFORMATION:**
+
+Before applying aggregation, you MUST have:
+1. **Master Source ID** - The ID of the master source to configure
+2. **EntityIdentifier Column** - The column name that should be mapped as EntityIdentifier
+3. **Lookup ID** - The ID of the lookup associated with this reconciliation (ask user if not available)
+
+**AGGREGATION WORKFLOW:**
+
+Step 1: WAIT FOR EXPLICIT USER REQUEST
+- DO NOT proactively suggest or apply aggregation
+- Only proceed if user explicitly asks for aggregation
+
+Step 2: GATHER REQUIRED INFORMATION
+- Ask for master_source_id if not available in context
+- Ask which column should be the EntityIdentifier
+- Ask for lookup_id if not available (this is critical for enabling aggregation)
+
+Step 3: APPLY AGGREGATION
+The tool will:
+a. Fetch current master source configuration via GET API
+b. Update master source with:
+   - Append "EntityIdentifier" to unique_keys array
+   - Update mapping_config to map the specified column to "EntityIdentifier" destination
+c. Fetch current lookup configuration via GET API
+d. Update lookup to enable aggregation for the EntityID column
+
+**API CALLS MADE BY THIS TOOL:**
+
+1. **GET Master Source:**
+   GET /v1/admin-recon-saas/sources/get/{master_source_id}
+   - Fetches current unique_keys and mapping_config
+
+2. **PATCH Master Source:**
+   PATCH /v1/admin-recon-saas/sources/update/{master_source_id}
+   - Updates unique_keys to include "EntityIdentifier"
+   - Updates mapping_config to map user's column to "EntityIdentifier" destination
+   
+3. **GET Lookup:**
+   GET /v1/admin-recon-saas/lookup/{lookup_id}
+   - Fetches current lookup configuration
+
+4. **PATCH Lookup:**
+   PATCH /v1/admin-recon-saas/lookup/{lookup_id}
+   - Enables aggregation on the config item containing "EntityID" in Columns
+
+**CONFIGURATION CHANGES:**
+
+**Master Source unique_keys (APPENDED, NOT REPLACED):**
+- The tool PRESERVES all existing unique_keys and APPENDS "EntityIdentifier" to them
+- Before: ["EntityID"] (or whatever keys already exist)
+- After: ["EntityID", "EntityIdentifier"] (existing keys + EntityIdentifier)
+- IMPORTANT: Existing keys like "EntityID" are NEVER removed, only "EntityIdentifier" is added
+
+**Master Source mapping_config:**
+The column specified by user will have its destination changed to "EntityIdentifier"
+Example: {"value": "", "source": "invoice_number", "destination": "EntityIdentifier"}
+
+**Lookup config:**
+The aggregation field is enabled for the config containing EntityID:
+Before: {"aggregation": {"enabled": false, "conditions": null}}
+After: {"aggregation": {"enabled": true, "conditions": null}}
+
+**EXAMPLE CONVERSATIONS:**
+
+**Example 1: User explicitly requests aggregation**
+
+User: "Enable aggregation on the invoice_number column for Source A"
+
+Assistant should:
+1. Check context for master_source_id of Source A
+2. If not available, ask: "What is the master_source_id for Source A?"
+3. Ask: "What is the lookup_id for this reconciliation?"
+4. Once all info is gathered, call the aggregation tool
+
+**Example 2: User provides all information**
+
+User: "I want to aggregate on column 'line_item_id' for master source ID 'ABC123' with lookup 'LKP456'"
+
+Assistant should proceed directly with the aggregation tool call.
+
+**Example 3: User does NOT request aggregation - DO NOT APPLY**
+
+User: "Create master sources for my two files"
+→ DO NOT apply aggregation. Just create the master sources.
+
+User: "Set up reconciliation for my files"
+→ DO NOT apply aggregation. Complete the setup without aggregation.
+
+**TOOL PARAMETERS:**
+
+Required:
+- master_source_id: ID of the master source to configure
+- source_name: Name of the source for reference
+- entity_identifier_column: The column name to map as EntityIdentifier
+- lookup_id: ID of the lookup to update for aggregation
+
+Optional:
+- environment: "local", "dev", or "prod" (defaults to "dev")
+
+**ERROR HANDLING:**
+
+- If master_source_id is invalid: Tool returns error with message to check the ID
+- If lookup_id is invalid: Tool returns error with message to check the ID
+- If column not found in mapping_config: Tool adds a new mapping entry
+- If EntityIdentifier already exists: Tool skips adding duplicate
+
+REMEMBER: Only apply aggregation when the user EXPLICITLY requests it!`
+
+		messages := []mcp.PromptMessage{
+			mcp.NewPromptMessage(
+				mcp.RoleUser,
+				mcp.NewTextContent(elaboratePrompt),
+			),
+		}
+
+		return mcp.NewGetPromptResult(
+			"Recon-SaaS Aggregation Config",
 			messages,
 		), nil
 	}

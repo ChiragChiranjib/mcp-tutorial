@@ -1132,9 +1132,27 @@ func toSnakeCase(s string) string {
 
 // ReconTransformationConfigTool provides intelligent transformation configuration for master sources
 // This tool understands all available transformation functions and helps users apply them correctly
+// IMPORTANT: This tool should ONLY be called when the user EXPLICITLY requests a transformation
 func ReconTransformationConfigTool() server.ServerTool {
 	tool := mcp.NewTool("recon_transformation_config",
-		mcp.WithDescription(`Intelligently configure transformations for recon-saas master sources.
+		mcp.WithDescription(`Configure transformations for recon-saas master sources ONLY when explicitly requested by the user.
+
+**CRITICAL: DO NOT AUTO-APPLY TRANSFORMATIONS**
+
+This tool should ONLY be used when the user EXPLICITLY requests a transformation.
+Do NOT automatically apply any transformation during normal onboarding or master source creation.
+
+**WHEN TO USE THIS TOOL:**
+- User explicitly says: "Apply transformation on column X"
+- User explicitly says: "Concatenate columns A, B, C to create EntityID"
+- User explicitly says: "Apply regex on column X to extract Y"
+- User explicitly says: "Transform date format from X to Y"
+
+**WHEN NOT TO USE THIS TOOL:**
+- During normal master source creation (unless user explicitly asks for transformation)
+- During file analysis
+- During onboarding flow (unless user explicitly asks for transformation)
+- When user doesn't mention transformation, regex, concatenation, or data formatting
 
 This tool helps you apply data transformations to master source columns. It understands the user's intent
 and generates the correct transformation_config and updates mapping_config when necessary.
@@ -1277,24 +1295,46 @@ AVAILABLE TRANSFORMATION FUNCTIONS:
     - Use case: "Remove double quotes from value"
 
 WORKFLOW:
-1. Identify the source and columns involved
+1. Identify the source and master_source_id
 2. Determine the transformation function needed
-3. Ask for output column name if creating a new column
-4. Generate transformation_config
-5. Update mapping_config if new column is created
-6. Apply changes via PATCH API
+3. Specify input columns and output column name
+4. The tool will AUTO-FETCH current mapping_config and transformation_config via GET API if not provided
+5. Generate and append new transformation_config
+6. Update mapping_config preserving all existing mappings
+7. Apply changes via PATCH API
+
+AUTO-FETCH FEATURE:
+If current_mapping_config is not provided, the tool automatically fetches it by calling:
+GET /v1/admin-recon-saas/sources/get/{master_source_id}
+This retrieves both current mapping_config and transformation_config from the server.
 
 IMPORTANT RULES:
 - Column references in logic use $ prefix: "$column_name"
 - output_columns contains the destination column name without $ prefix
-- When output_column is different from existing mapped columns, add to mapping_config
-- When output_column replaces an existing mapped column, update mapping_config
-- MAPPING DESTINATION NAMING:
-  - Special columns keep their name: EntityID, EntityStatus, EntityIdentifier, Amount
-  - All other columns are converted to snake_case (e.g., "Invoice Date" -> "invoice_date")
-  - Example: output_column="Amount" -> destination="Amount" (special)
-  - Example: output_column="total_value" -> destination="total_value" (already snake_case)
-  - Example: output_column="Net Amount" -> destination="net_amount" (converted)
+- ALL EXISTING MAPPINGS ARE PRESERVED - only modifications/additions are made
+
+MAPPING CONFIG UPDATE LOGIC:
+
+**For Special Columns (EntityID, EntityStatus, EntityIdentifier, Amount):**
+When output_column is a special column:
+1. Find any existing mapping where destination equals the special column
+2. Change that mapping's destination to snake_case of its source (e.g., "Notes" -> "notes")
+3. Append a NEW mapping: {source: "<special_column>", destination: "<special_column>"}
+
+Example:
+- Before: [{"source": "Notes", "destination": "EntityID"}, {"source": "amount", "destination": "Amount"}]
+- Transformation: output_column = "EntityID"
+- After: [{"source": "Notes", "destination": "notes"}, {"source": "amount", "destination": "Amount"}, {"source": "EntityID", "destination": "EntityID"}]
+
+**For Non-Special Columns:**
+When output_column is NOT a special column:
+1. Check if output_column already exists as a destination
+2. If not found, append: {source: "<output_column>", destination: "<snake_case>"}
+
+Example:
+- Before: [{"source": "col1", "destination": "col1"}]
+- Transformation: output_column = "Extracted Value"
+- After: [{"source": "col1", "destination": "col1"}, {"source": "Extracted Value", "destination": "extracted_value"}]
 `),
 		mcp.WithString("environment",
 			mcp.Description("Environment to use for API calls: 'local', 'dev', or 'prod'. Defaults to 'dev'."),
@@ -1354,11 +1394,10 @@ IMPORTANT RULES:
 			mcp.Required(),
 		),
 		mcp.WithString("current_mapping_config",
-			mcp.Description("JSON array of current mapping_config from the master source. This is needed to properly update mappings."),
-			mcp.Required(),
+			mcp.Description("Optional: JSON array of current mapping_config. If not provided, the tool will AUTO-FETCH it from the server using GET /v1/admin-recon-saas/sources/get/{master_source_id}"),
 		),
 		mcp.WithString("current_transformation_config",
-			mcp.Description("JSON array of current transformation_config from the master source. Empty array [] if no transformations exist yet."),
+			mcp.Description("Optional: JSON array of current transformation_config. If not provided along with mapping_config, it will be AUTO-FETCHED from the server."),
 		),
 	)
 
@@ -1390,13 +1429,54 @@ IMPORTANT RULES:
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 
-		currentMappingConfigJSON, err := request.RequireString("current_mapping_config")
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+		currentMappingConfigJSON := request.GetString("current_mapping_config", "")
+		additionalParamsJSON := request.GetString("additional_params", "[]")
+		currentTransformationConfigJSON := request.GetString("current_transformation_config", "")
+
+		// If current_mapping_config is not provided, fetch it from the API
+		var fetchedFromAPI bool
+		var fetchedSourceDetails map[string]interface{}
+		if currentMappingConfigJSON == "" {
+			// Fetch master source details via GET API
+			endpoint := fmt.Sprintf("/v1/admin-recon-saas/sources/get/%s", masterSourceID)
+			sourceDetails, err := makeReconSaaSAPICall(ctx, "GET", endpoint, nil, environment)
+			if err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("Failed to fetch master source details. Please provide current_mapping_config manually or check if master_source_id '%s' is valid: %v", masterSourceID, err)), nil
+			}
+			fetchedSourceDetails = sourceDetails
+
+			// Extract mapping_config from response
+			if mappingConfig, ok := sourceDetails["mapping_config"]; ok && mappingConfig != nil {
+				mappingBytes, err := json.Marshal(mappingConfig)
+				if err != nil {
+					return mcp.NewToolResultError(fmt.Sprintf("Failed to marshal mapping_config: %v", err)), nil
+				}
+				currentMappingConfigJSON = string(mappingBytes)
+			} else {
+				currentMappingConfigJSON = "[]"
+			}
+
+			// Extract transformation_config from response if not provided
+			if currentTransformationConfigJSON == "" {
+				if transformConfig, ok := sourceDetails["transformation_config"]; ok && transformConfig != nil {
+					transformBytes, err := json.Marshal(transformConfig)
+					if err != nil {
+						currentTransformationConfigJSON = "[]"
+					} else {
+						currentTransformationConfigJSON = string(transformBytes)
+					}
+				} else {
+					currentTransformationConfigJSON = "[]"
+				}
+			}
+
+			fetchedFromAPI = true
 		}
 
-		additionalParamsJSON := request.GetString("additional_params", "[]")
-		currentTransformationConfigJSON := request.GetString("current_transformation_config", "[]")
+		// Ensure we have valid JSON for transformation config
+		if currentTransformationConfigJSON == "" || currentTransformationConfigJSON == "null" {
+			currentTransformationConfigJSON = "[]"
+		}
 
 		// Parse input columns
 		var inputColumns []string
@@ -1444,63 +1524,90 @@ IMPORTANT RULES:
 		// Append to existing transformations
 		updatedTransformationConfig := append(currentTransformationConfig, newTransformation)
 
-		// Check if output column needs to be added to mapping_config
-		updatedMappingConfig := make([]map[string]interface{}, len(currentMappingConfig))
-		copy(updatedMappingConfig, currentMappingConfig)
-
-		outputColumnExists := false
-		outputColumnIsDestination := false
-
-		for i, mapping := range updatedMappingConfig {
-			dest, _ := mapping["destination"].(string)
-			source, _ := mapping["source"].(string)
-
-			// Check if output column already exists as a destination
-			if dest == outputColumn {
-				outputColumnExists = true
-				outputColumnIsDestination = true
-				break
-			}
-
-			// Check if an input column is currently mapped to the output column destination
-			// and needs to be remapped
-			for _, inputCol := range inputColumns {
-				if source == inputCol && dest == outputColumn {
-					// This input column was previously mapped to our output column
-					// We need to remap it to a different destination (snake_case)
-					newDest := toSnakeCase(inputCol)
-					updatedMappingConfig[i] = map[string]interface{}{
-						"value":       "",
-						"source":      inputCol,
-						"destination": newDest,
-					}
-				}
-			}
+		// Define special columns that keep their exact name as destination
+		specialColumns := map[string]bool{
+			"EntityID":         true,
+			"EntityStatus":     true,
+			"EntityIdentifier": true,
+			"Amount":           true,
 		}
 
-		// If output column doesn't exist as a destination, add it
-		if !outputColumnIsDestination {
-			// Determine the destination name based on whether it's a special column
-			specialColumns := map[string]bool{
-				"EntityID":         true,
-				"EntityStatus":     true,
-				"EntityIdentifier": true,
-				"Amount":           true,
+		// Deep copy the current mapping config to avoid modifying the original
+		updatedMappingConfig := make([]map[string]interface{}, len(currentMappingConfig))
+		for i, mapping := range currentMappingConfig {
+			newMapping := make(map[string]interface{})
+			for k, v := range mapping {
+				newMapping[k] = v
+			}
+			updatedMappingConfig[i] = newMapping
+		}
+
+		isSpecialColumn := specialColumns[outputColumn]
+
+		// Track which mappings were modified for debugging
+		var modifiedMappings []map[string]interface{}
+
+		if isSpecialColumn {
+			// For special columns (EntityID, EntityStatus, EntityIdentifier, Amount):
+			// 1. Find any existing mapping where destination == outputColumn
+			// 2. Change that mapping's destination to snake_case of its source
+			// 3. Append new mapping: {source: outputColumn, destination: outputColumn}
+
+			for i, mapping := range updatedMappingConfig {
+				dest, _ := mapping["destination"].(string)
+				source, _ := mapping["source"].(string)
+
+				// Trim whitespace for safety
+				dest = strings.TrimSpace(dest)
+				source = strings.TrimSpace(source)
+
+				if dest == outputColumn {
+					// This mapping currently points to our special column
+					// Remap it to snake_case of its source
+					newDest := toSnakeCase(source)
+					oldDest := updatedMappingConfig[i]["destination"]
+					updatedMappingConfig[i]["destination"] = newDest
+
+					// Track the modification
+					modifiedMappings = append(modifiedMappings, map[string]interface{}{
+						"index":           i,
+						"source":          source,
+						"old_destination": oldDest,
+						"new_destination": newDest,
+					})
+				}
 			}
 
-			destination := outputColumn
-			if !specialColumns[outputColumn] {
-				// Convert to snake_case for non-special columns
-				destination = toSnakeCase(outputColumn)
-			}
-
-			// Add new mapping for the transformation output
+			// Append new mapping for the transformation output (special column)
 			newMapping := map[string]interface{}{
 				"value":       "",
 				"source":      outputColumn,
-				"destination": destination,
+				"destination": outputColumn,
 			}
 			updatedMappingConfig = append(updatedMappingConfig, newMapping)
+		} else {
+			// For non-special columns:
+			// Check if output_column already exists as a destination
+			// If not, append with snake_case destination
+
+			outputColumnExistsAsDestination := false
+			for _, mapping := range updatedMappingConfig {
+				dest, _ := mapping["destination"].(string)
+				if dest == outputColumn || dest == toSnakeCase(outputColumn) {
+					outputColumnExistsAsDestination = true
+					break
+				}
+			}
+
+			if !outputColumnExistsAsDestination {
+				// Add new mapping with snake_case destination
+				newMapping := map[string]interface{}{
+					"value":       "",
+					"source":      outputColumn,
+					"destination": toSnakeCase(outputColumn),
+				}
+				updatedMappingConfig = append(updatedMappingConfig, newMapping)
+			}
 		}
 
 		// Prepare the update payload
@@ -1516,7 +1623,7 @@ IMPORTANT RULES:
 			return mcp.NewToolResultError(fmt.Sprintf("Failed to update master source: %v", err)), nil
 		}
 
-		// Build comprehensive response
+		// Build comprehensive response with debug info
 		response := map[string]interface{}{
 			"status":      "success",
 			"message":     fmt.Sprintf("Transformation applied successfully to %s", sourceName),
@@ -1531,12 +1638,328 @@ IMPORTANT RULES:
 				"output_column":  outputColumn,
 				"transformation": newTransformation,
 			},
-			"updated_configs": map[string]interface{}{
-				"transformation_config": updatedTransformationConfig,
-				"mapping_config":        updatedMappingConfig,
-				"output_column_existed": outputColumnExists,
+			"configs_before": map[string]interface{}{
+				"mapping_config":              currentMappingConfig,
+				"mapping_config_count":        len(currentMappingConfig),
+				"transformation_config_count": len(currentTransformationConfig),
+			},
+			"configs_after": map[string]interface{}{
+				"transformation_config":   updatedTransformationConfig,
+				"mapping_config":          updatedMappingConfig,
+				"mapping_config_count":    len(updatedMappingConfig),
+				"is_special_column":       isSpecialColumn,
+				"config_fetched_from_api": fetchedFromAPI,
+				"modified_mappings":       modifiedMappings,
 			},
 			"api_response": result,
+		}
+
+		// Add fetched source details for debugging if available
+		if fetchedSourceDetails != nil {
+			response["fetched_source_name"] = fetchedSourceDetails["name"]
+		}
+
+		resultJSON, _ := json.MarshalIndent(response, "", "  ")
+		return mcp.NewToolResultText(string(resultJSON)), nil
+	}
+
+	return server.ServerTool{
+		Tool:    tool,
+		Handler: handler,
+	}
+}
+
+// ReconAggregationTool configures aggregation for recon-saas master sources
+// This tool should ONLY be called when the user EXPLICITLY requests aggregation on a column
+func ReconAggregationTool() server.ServerTool {
+	tool := mcp.NewTool("recon_aggregation_config",
+		mcp.WithDescription(`Configure aggregation for recon-saas master sources ONLY when explicitly requested by the user.
+
+**CRITICAL: DO NOT AUTO-APPLY AGGREGATION**
+
+This tool should ONLY be used when the user EXPLICITLY requests aggregation configuration.
+Do NOT automatically apply aggregation during normal onboarding or master source creation.
+
+**WHEN TO USE THIS TOOL:**
+- User explicitly says: "Enable aggregation on column X"
+- User explicitly says: "Configure aggregation for EntityIdentifier"
+- User explicitly says: "Set up aggregation with column X as EntityIdentifier"
+- User explicitly says: "I want to aggregate on column X"
+
+**WHEN NOT TO USE THIS TOOL:**
+- During normal master source creation
+- During file analysis
+- During onboarding flow (unless user explicitly asks for aggregation)
+- When user doesn't mention aggregation
+
+**WHAT THIS TOOL DOES:**
+1. Fetches current master source configuration via GET API
+2. Updates master source with:
+   - APPENDS "EntityIdentifier" to existing unique_keys array (preserves all existing keys like "EntityID")
+   - Example: ["EntityID"] becomes ["EntityID", "EntityIdentifier"]
+   - Updates mapping_config to map the specified column to "EntityIdentifier" destination
+3. Fetches current lookup configuration via GET API
+4. Updates lookup to enable aggregation for the EntityID column
+
+**REQUIRED INPUTS:**
+- master_source_id: ID of the master source to configure
+- entity_identifier_column: The column name that should be mapped as EntityIdentifier
+- lookup_id: ID of the lookup to update for aggregation (ask user if not available)
+`),
+		mcp.WithString("environment",
+			mcp.Description("Environment to use for API calls: 'local', 'dev', or 'prod'. Defaults to 'dev'."),
+			mcp.Enum("local", "dev", "prod"),
+			mcp.DefaultString("dev"),
+		),
+		mcp.WithString("master_source_id",
+			mcp.Description("ID of the master source to configure aggregation for"),
+			mcp.Required(),
+		),
+		mcp.WithString("source_name",
+			mcp.Description("Name of the source for reference (e.g., 'Source A', 'POS Transactions')"),
+			mcp.Required(),
+		),
+		mcp.WithString("entity_identifier_column",
+			mcp.Description("The column name from the source file that should be mapped as EntityIdentifier for aggregation"),
+			mcp.Required(),
+		),
+		mcp.WithString("lookup_id",
+			mcp.Description("ID of the lookup to update for enabling aggregation. This is required to enable aggregation on the lookup."),
+			mcp.Required(),
+		),
+	)
+
+	handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		environment := request.GetString("environment", DefaultEnvironment)
+
+		masterSourceID, err := request.RequireString("master_source_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		sourceName, err := request.RequireString("source_name")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		entityIdentifierColumn, err := request.RequireString("entity_identifier_column")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		lookupID, err := request.RequireString("lookup_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Step 1: Fetch current master source configuration via GET API
+		masterSourceEndpoint := fmt.Sprintf("/v1/admin-recon-saas/sources/get/%s", masterSourceID)
+		masterSourceDetails, err := makeReconSaaSAPICall(ctx, "GET", masterSourceEndpoint, nil, environment)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to fetch master source details for ID '%s': %v", masterSourceID, err)), nil
+		}
+
+		// Extract current unique_keys with robust type handling
+		var currentUniqueKeys []string
+		if uniqueKeys, ok := masterSourceDetails["config"].(map[string]interface{})["unique_keys"]; ok && uniqueKeys != nil {
+			// Handle []interface{} type (common JSON unmarshaling result)
+			if keysSlice, ok := uniqueKeys.([]interface{}); ok {
+				for _, key := range keysSlice {
+					if keyStr, ok := key.(string); ok {
+						currentUniqueKeys = append(currentUniqueKeys, keyStr)
+					}
+				}
+			} else if keysSlice, ok := uniqueKeys.([]string); ok {
+				// Handle []string type directly
+				currentUniqueKeys = append(currentUniqueKeys, keysSlice...)
+			}
+		}
+
+		// If currentUniqueKeys is still empty, try to extract from raw JSON
+		// This handles cases where the type assertion might have failed
+		if len(currentUniqueKeys) == 0 {
+			// Check if unique_keys exists but extraction failed - default to EntityID
+			if _, exists := masterSourceDetails["unique_keys"]; exists {
+				// Log warning: extraction might have failed, but we'll preserve what we can
+				// Default assumption: EntityID should exist
+				currentUniqueKeys = []string{"EntityID"}
+			}
+		}
+
+		// Check if EntityIdentifier already exists in unique_keys
+		entityIdentifierExists := false
+		for _, key := range currentUniqueKeys {
+			if key == "EntityIdentifier" {
+				entityIdentifierExists = true
+				break
+			}
+		}
+
+		// IMPORTANT: Create a new slice that preserves ALL existing keys and appends EntityIdentifier
+		var updatedUniqueKeys []string
+		// First, copy all existing unique_keys
+		updatedUniqueKeys = append(updatedUniqueKeys, currentUniqueKeys...)
+		// Then append EntityIdentifier if not already present
+		if !entityIdentifierExists {
+			updatedUniqueKeys = append(updatedUniqueKeys, "EntityIdentifier")
+		}
+
+		// Extract current mapping_config
+		var currentMappingConfig []map[string]interface{}
+		if mappingConfig, ok := masterSourceDetails["mapping_config"]; ok && mappingConfig != nil {
+			if configSlice, ok := mappingConfig.([]interface{}); ok {
+				for _, item := range configSlice {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						currentMappingConfig = append(currentMappingConfig, itemMap)
+					}
+				}
+			}
+		}
+
+		// Deep copy and update mapping_config
+		updatedMappingConfig := make([]map[string]interface{}, len(currentMappingConfig))
+		entityIdentifierMappingExists := false
+		entityIdentifierColumnFound := false
+
+		for i, mapping := range currentMappingConfig {
+			newMapping := make(map[string]interface{})
+			for k, v := range mapping {
+				newMapping[k] = v
+			}
+
+			// Check if this is the column user specified for EntityIdentifier
+			source, _ := mapping["source"].(string)
+			dest, _ := mapping["destination"].(string)
+
+			if source == entityIdentifierColumn {
+				entityIdentifierColumnFound = true
+				// Update this mapping to point to EntityIdentifier destination
+				newMapping["destination"] = "EntityIdentifier"
+				entityIdentifierMappingExists = true
+			}
+
+			// Check if EntityIdentifier destination already exists
+			if dest == "EntityIdentifier" {
+				entityIdentifierMappingExists = true
+			}
+
+			updatedMappingConfig[i] = newMapping
+		}
+
+		// If the column wasn't found in existing mappings, add a new mapping
+		if !entityIdentifierColumnFound && !entityIdentifierMappingExists {
+			newMapping := map[string]interface{}{
+				"value":       "",
+				"source":      entityIdentifierColumn,
+				"destination": "EntityIdentifier",
+			}
+			updatedMappingConfig = append(updatedMappingConfig, newMapping)
+		}
+
+		// Step 2: Update master source via PATCH API
+		masterSourceUpdatePayload := map[string]interface{}{
+			"unique_keys":    updatedUniqueKeys,
+			"mapping_config": updatedMappingConfig,
+		}
+
+		masterSourceUpdateEndpoint := fmt.Sprintf("/v1/admin-recon-saas/sources/update/%s", masterSourceID)
+		masterSourceUpdateResult, err := makeReconSaaSAPICall(ctx, "PATCH", masterSourceUpdateEndpoint, masterSourceUpdatePayload, environment)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to update master source: %v", err)), nil
+		}
+
+		// Step 3: Fetch current lookup configuration via GET API
+		lookupEndpoint := fmt.Sprintf("/v1/admin-recon-saas/lookup/%s", lookupID)
+		lookupDetails, err := makeReconSaaSAPICall(ctx, "GET", lookupEndpoint, nil, environment)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to fetch lookup details for ID '%s': %v", lookupID, err)), nil
+		}
+
+		// Extract current lookup config
+		var lookupConfig []map[string]interface{}
+		if config, ok := lookupDetails["config"]; ok && config != nil {
+			if configSlice, ok := config.([]interface{}); ok {
+				for _, item := range configSlice {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						lookupConfig = append(lookupConfig, itemMap)
+					}
+				}
+			}
+		}
+
+		// Update lookup config to enable aggregation for EntityID column
+		updatedLookupConfig := make([]map[string]interface{}, len(lookupConfig))
+		aggregationEnabled := false
+
+		for i, configItem := range lookupConfig {
+			newConfigItem := make(map[string]interface{})
+			for k, v := range configItem {
+				newConfigItem[k] = v
+			}
+
+			// Check if this config item contains EntityID in Columns
+			if columns, ok := configItem["Columns"]; ok {
+				if colSlice, ok := columns.([]interface{}); ok {
+					for _, col := range colSlice {
+						if colStr, ok := col.(string); ok && colStr == "EntityID" {
+							// Enable aggregation for this config item
+							newConfigItem["aggregation"] = map[string]interface{}{
+								"enabled":    true,
+								"conditions": nil,
+							}
+							aggregationEnabled = true
+							break
+						}
+					}
+				}
+			}
+
+			updatedLookupConfig[i] = newConfigItem
+		}
+
+		// Step 4: Update lookup via PATCH API
+		lookupUpdatePayload := map[string]interface{}{
+			"config": updatedLookupConfig,
+		}
+
+		lookupUpdateEndpoint := fmt.Sprintf("/v1/admin-recon-saas/lookup/%s", lookupID)
+		lookupUpdateResult, err := makeReconSaaSAPICall(ctx, "PATCH", lookupUpdateEndpoint, lookupUpdatePayload, environment)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to update lookup: %v", err)), nil
+		}
+
+		// Extract raw unique_keys from API response for debugging
+		rawUniqueKeys := masterSourceDetails["unique_keys"]
+
+		// Build comprehensive response
+		response := map[string]interface{}{
+			"status":      "success",
+			"message":     fmt.Sprintf("Aggregation configured successfully for %s", sourceName),
+			"environment": GetEnvironmentName(environment),
+			"master_source_update": map[string]interface{}{
+				"master_source_id":         masterSourceID,
+				"source_name":              sourceName,
+				"entity_identifier_column": entityIdentifierColumn,
+				"unique_keys_raw_from_api": rawUniqueKeys,
+				"unique_keys_extracted":    currentUniqueKeys,
+				"unique_keys_after":        updatedUniqueKeys,
+				"mapping_config_updated":   true,
+				"entity_identifier_added":  !entityIdentifierExists,
+				"api_response":             masterSourceUpdateResult,
+			},
+			"lookup_update": map[string]interface{}{
+				"lookup_id":           lookupID,
+				"aggregation_enabled": aggregationEnabled,
+				"config_before":       lookupConfig,
+				"config_after":        updatedLookupConfig,
+				"api_response":        lookupUpdateResult,
+			},
+			"summary": map[string]interface{}{
+				"master_source_updated": true,
+				"lookup_updated":        true,
+				"aggregation_ready":     aggregationEnabled,
+				"unique_keys_preserved": len(currentUniqueKeys) > 0,
+			},
 		}
 
 		resultJSON, _ := json.MarshalIndent(response, "", "  ")
