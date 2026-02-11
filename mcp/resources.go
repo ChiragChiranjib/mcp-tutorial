@@ -24,7 +24,7 @@ func SystemStatusResource() server.ServerResource {
 
 		status := map[string]interface{}{
 			"timestamp":   now.Format(time.RFC3339),
-			"server_name": "Tutorial MCP Server",
+			"server_name": "ReconSaas MCP Server",
 			"version":     "1.0.0",
 			"status":      "operational",
 			"uptime_info": map[string]interface{}{

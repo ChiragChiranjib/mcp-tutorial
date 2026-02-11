@@ -58,7 +58,7 @@ chmod +x bin/*
 ### 3. Update Paths
 Edit the configuration files and replace:
 ```
-/Users/chirag.chiranjib/razorpay/golang/mcp/tutorial/bin/stdio
+/Users/aditya.raj/Desktop/workspace/mcp-tutorial/bin/stdio
 ```
 With your actual absolute path to the stdio binary.
 
@@ -72,9 +72,9 @@ All three servers provide identical functionality:
 
 ### Transport Methods
 
-1. **tutorial-mcp-stdio** - Standard input/output (always available)
-2. **tutorial-mcp-sse** - Server-Sent Events over HTTP (requires server running)
-3. **tutorial-mcp-http** - HTTP with streaming (requires server running)
+1. **reconsaas-mcp-stdio** - Standard input/output (always available)
+2. **reconsaas-mcp-sse** - Server-Sent Events over HTTP (requires server running)
+3. **reconsaas-mcp-http** - HTTP with streaming (requires server running)
 
 ## Testing
 

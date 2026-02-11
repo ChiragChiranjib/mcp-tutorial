@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"tutorial/mcp"
+	"reconsaas/mcp"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -37,7 +37,7 @@ func main() {
 	}
 
 	mcpServer := server.NewMCPServer(
-		"tutorial-mcp-server",
+		"reconsaas-mcp-server",
 		version,
 		server.WithLogging(),
 		server.WithToolCapabilities(true),
@@ -46,13 +46,27 @@ func main() {
 	)
 
 	mcpServer.AddTools(
-		mcp.CalculatorTool(),
-		mcp.SystemInfoTool(),
+		// Recon-SaaS tools
+		mcp.ReconFileAnalysisTool(),
+		mcp.ReconMasterSourceTool(),
+		mcp.ReconMerchantSourceTool(),
+		mcp.ReconStateRuleTool(),
+		mcp.ReconProcessSetupTool(),
+		mcp.ReconEntityUpdateTool(),
+		mcp.ReconTransformationConfigTool(),
+		mcp.ReconAggregationTool(),
 	)
 
 	mcpServer.AddPrompts(
-		mcp.MathTutorPrompt(),
-		mcp.CodeReviewPrompt(),
+		// Recon-SaaS prompts
+		mcp.ReconFileAnalysisPrompt(),
+		mcp.ReconMasterSourcePrompt(),
+		mcp.ReconMerchantSourcePrompt(),
+		mcp.ReconStateRulePrompt(),
+		mcp.ReconProcessSetupPrompt(),
+		mcp.ReconEntityUpdatePrompt(),
+		mcp.ReconTransformationConfigPrompt(),
+		mcp.ReconAggregationConfigPrompt(),
 	)
 
 	mcpServer.AddResources(
@@ -71,11 +85,11 @@ func main() {
 		errChan <- sseServer.Start(fmt.Sprintf(":%d", port))
 	}()
 
-	logger.Info("Tutorial MCP Server started", "version", version, "transport", "sse", "port", port)
+	logger.Info("ReconSaas MCP Server started", "version", version, "transport", "sse", "port", port)
 
 	select {
 	case <-ctx.Done():
-		logger.Info("Tutorial MCP Server stopped")
+		logger.Info("ReconSaas MCP Server stopped")
 	case err := <-errChan:
 		if err != nil {
 			logger.Error("Server error", "error", err)
